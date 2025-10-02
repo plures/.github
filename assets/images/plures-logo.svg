@@ -1,0 +1,20 @@
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="url(#logoGradient)"/>
+  
+  <!-- Letter P design -->
+  <path d="M 60 50 L 60 150 M 60 50 L 110 50 Q 140 50 140 80 Q 140 110 110 110 L 60 110" 
+        stroke="white" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Decorative dots -->
+  <circle cx="130" cy="135" r="6" fill="white" opacity="0.8"/>
+  <circle cx="115" cy="145" r="5" fill="white" opacity="0.6"/>
+  <circle cx="100" cy="150" r="4" fill="white" opacity="0.4"/>
+</svg>
