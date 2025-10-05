@@ -174,6 +174,6 @@ Our projects are primarily licensed under the **MIT License**, promoting open co
 
 ---
 
-![Plures Logo](assets/images/plures-logo.svg)
+<img width="80" src="assets/images/plures-logo.svg">
 
 </div>
