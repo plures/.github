@@ -1,6 +1,6 @@
 <div align="center">
 
-![Plures Banner](https://raw.githubusercontent.com/plures/.github/main/assets/images/plures-banner.svg)
+![Plures Banner](assets/images/plures-banner.svg)
 
 # Welcome to Plures
 
@@ -29,28 +29,28 @@ Our mission is to streamline development workflows, enhance productivity, and pr
 <table>
 <tr>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-development.svg" width="80" alt="Developer-First">
+<img src="assets/images/icon-development.svg" width="80" alt="Developer-First">
 <br><br>
 <strong>Developer-First</strong>
 <br>
 <sub>Built by developers, for developers. We understand your workflow.</sub>
 </td>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-opensource.svg" width="80" alt="Open Source">
+<img src="assets/images/icon-opensource.svg" width="80" alt="Open Source">
 <br><br>
 <strong>Open Source</strong>
 <br>
 <sub>Transparent, collaborative, and community-driven development.</sub>
 </td>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-innovation.svg" width="80" alt="Innovation">
+<img src="assets/images/icon-innovation.svg" width="80" alt="Innovation">
 <br><br>
 <strong>Innovation</strong>
 <br>
 <sub>Pushing boundaries with cutting-edge tools and technologies.</sub>
 </td>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-quality.svg" width="80" alt="Quality">
+<img src="assets/images/icon-quality.svg" width="80" alt="Quality">
 <br><br>
 <strong>Quality</strong>
 <br>
@@ -150,16 +150,6 @@ Share ideas, ask questions, and connect with other developers in our repositorie
 
 ---
 
-## 📊 GitHub Stats
-
-<div align="center">
-
-![Plures GitHub Stats](https://github-readme-stats.vercel.app/api?username=kayodebristol&show_icons=true&theme=radical&hide_border=true&bg_color=667eea&title_color=ffffff&text_color=ffffff&icon_color=ffffff)
-
-</div>
-
----
-
 ## 📜 License
 
 Our projects are primarily licensed under the **MIT License**, promoting open collaboration and reuse. Check individual repositories for specific licensing information.
@@ -184,6 +174,6 @@ Our projects are primarily licensed under the **MIT License**, promoting open co
 
 ---
 
-![Plures Logo](https://raw.githubusercontent.com/plures/.github/main/assets/images/plures-logo.svg)
+<img width="80" src="assets/images/plures-logo.svg">
 
 </div>
