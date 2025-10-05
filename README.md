@@ -150,16 +150,6 @@ Share ideas, ask questions, and connect with other developers in our repositorie
 
 ---
 
-## 📊 GitHub Stats
-
-<div align="center">
-
-[![Anurag's GitHub stats](https://github-readme-stats.vercel.app/api?username=plures)](https://github.com/anuraghazra/github-readme-stats)
-
-</div>
-
----
-
 ## 📜 License
 
 Our projects are primarily licensed under the **MIT License**, promoting open collaboration and reuse. Check individual repositories for specific licensing information.
