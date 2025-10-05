@@ -154,7 +154,7 @@ Share ideas, ask questions, and connect with other developers in our repositorie
 
 <div align="center">
 
-![Plures GitHub Stats](https://github-readme-stats.vercel.app/api?username=plures&show_icons=true&theme=radical&hide_border=true&bg_color=667eea&title_color=ffffff&text_color=ffffff&icon_color=ffffff)
+![Plures GitHub Stats](https://github-readme-stats.vercel.app/api?username=kayodebristol&show_icons=true&theme=radical&hide_border=true&bg_color=667eea&title_color=ffffff&text_color=ffffff&icon_color=ffffff)
 
 </div>
 
