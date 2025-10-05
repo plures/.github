@@ -1,6 +1,6 @@
 <div align="center">
 
-![Plures Banner](assets/images/plures-banner.svg)
+![Plures Banner](https://raw.githubusercontent.com/plures/.github/main/assets/images/plures-banner.svg)
 
 # Welcome to Plures
 
@@ -29,28 +29,28 @@ Our mission is to streamline development workflows, enhance productivity, and pr
 <table>
 <tr>
 <td align="center" width="25%">
-<img src="assets/images/icon-development.svg" width="80" alt="Developer-First">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-development.svg" width="80" alt="Developer-First">
 <br><br>
 <strong>Developer-First</strong>
 <br>
 <sub>Built by developers, for developers. We understand your workflow.</sub>
 </td>
 <td align="center" width="25%">
-<img src="assets/images/icon-opensource.svg" width="80" alt="Open Source">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-opensource.svg" width="80" alt="Open Source">
 <br><br>
 <strong>Open Source</strong>
 <br>
 <sub>Transparent, collaborative, and community-driven development.</sub>
 </td>
 <td align="center" width="25%">
-<img src="assets/images/icon-innovation.svg" width="80" alt="Innovation">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-innovation.svg" width="80" alt="Innovation">
 <br><br>
 <strong>Innovation</strong>
 <br>
 <sub>Pushing boundaries with cutting-edge tools and technologies.</sub>
 </td>
 <td align="center" width="25%">
-<img src="assets/images/icon-quality.svg" width="80" alt="Quality">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-quality.svg" width="80" alt="Quality">
 <br><br>
 <strong>Quality</strong>
 <br>
@@ -90,7 +90,6 @@ An experimental project exploring real-time, decentralized data synchronization 
 - 🔫 GunDB for decentralized database
 - 🌐 Real-time peer-to-peer synchronization
 
-[🔗 Explore the Project](https://github.com/plures/svelte-as-gun)
 
 ---
 
@@ -174,6 +173,6 @@ Our projects are primarily licensed under the **MIT License**, promoting open co
 
 ---
 
-<img width="80" src="assets/images/plures-logo.svg">
+<img width="80" src="https://raw.githubusercontent.com/plures/.github/main/assets/images/plures-logo.svg">
 
 </div>
