@@ -1,0 +1,32 @@
+name: "Copilot Task"
+description: "A well-scoped task intended to be executed by @copilot (with human oversight)."
+title: "[copilot] "
+labels: ["copilot"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to delegate work to **@copilot**.
+
+        Safety: prefer reversible changes; avoid destructive operations.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What needs to be done and why?
+    validations:
+      required: true
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: Deliverables / acceptance criteria
+      description: Concrete outputs (PRs, files, tests, docs).
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints / non-goals
+      description: What must not happen.
+    validations:
+      required: false
