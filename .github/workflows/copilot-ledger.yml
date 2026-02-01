@@ -1,4 +1,4 @@
-name: Copilot ledger (issue comment)
+name: Copilot delegation (assign + comment)
 
 on:
   issues:
@@ -8,16 +8,29 @@ permissions:
   issues: write
 
 jobs:
-  comment:
+  delegate:
     if: github.event.label.name == 'copilot'
     runs-on: ubuntu-latest
     steps:
-      - name: Post delegation comment
+      - name: Assign Copilot + post delegation comment
         uses: actions/github-script@v7
         with:
           script: |
             const issue_number = context.payload.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+
+            // Assign Copilot (works even when gh CLI can't resolve assignable users)
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number,
+                assignees: ["Copilot"],
+              });
+            } catch (e) {
+              core.warning(`Failed to assign Copilot: ${e.message}`);
+            }
+
             const body = `@copilot\n\nThis issue is delegated to Copilot. Please propose an implementation plan and open a PR that satisfies the acceptance criteria in the issue body.\n\nConstraints:\n- Prefer reversible changes\n- No destructive operations\n- Keep changes small and well-tested\n`;
             await github.rest.issues.createComment({ owner, repo, issue_number, body });
