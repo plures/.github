@@ -1,0 +1,35 @@
+# Standard Plures release pipeline.
+# Calls the org-wide reusable workflow in plures/.github.
+#
+# On push to main: auto-detects version bump from conventional commits.
+# Manual dispatch: choose patch/minor/major.
+#
+# Publishes to all applicable registries based on project files detected:
+#   package.json → npm + GitHub Packages
+#   deno.json    → JSR
+#   Cargo.toml   → crates.io
+#   Dockerfile   → GHCR + Docker Hub
+#   .vscodeignore → VS Code Marketplace + Open VSX
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    uses: plures/.github/.github/workflows/release-reusable.yml@main
+    with:
+      bump: ${{ inputs.bump || '' }}
+    secrets: inherit

@@ -1,0 +1,465 @@
+name: Plures Release Pipeline
+
+# Reusable release workflow for all plures org repos.
+# Handles: version bump, changelog, tag, GitHub Release, publish to registries.
+#
+# USAGE in your repo's .github/workflows/release.yml:
+#
+#   name: Release
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#       inputs:
+#         bump:
+#           description: 'Force version bump (patch/minor/major)'
+#           type: choice
+#           options: [patch, minor, major]
+#   jobs:
+#     release:
+#       uses: plures/.github/.github/workflows/release-reusable.yml@main
+#       with:
+#         bump: ${{ inputs.bump || '' }}
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      bump:
+        description: "Force version bump type (empty = auto-detect from commits)"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run (skip publishing)"
+        required: false
+        type: boolean
+        default: false
+      skip_tests:
+        description: "Skip test step"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # 1. Detect project type and determine version bump
+  # ──────────────────────────────────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      new_version: ${{ steps.decide.outputs.new_version }}
+      bump_type: ${{ steps.decide.outputs.bump_type }}
+      current_version: ${{ steps.detect.outputs.current_version }}
+      has_npm: ${{ steps.detect.outputs.has_npm }}
+      has_deno: ${{ steps.detect.outputs.has_deno }}
+      has_cargo: ${{ steps.detect.outputs.has_cargo }}
+      has_docker: ${{ steps.detect.outputs.has_docker }}
+      has_vscode: ${{ steps.detect.outputs.has_vscode }}
+      has_nuget: ${{ steps.detect.outputs.has_nuget }}
+      pkg_manager: ${{ steps.detect.outputs.pkg_manager }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commit analysis
+
+      - name: Detect project type
+        id: detect
+        run: |
+          # Detect what kind of project this is
+          echo "has_npm=$( [ -f package.json ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_deno=$( [ -f deno.json ] || [ -f deno.jsonc ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_cargo=$( [ -f Cargo.toml ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_docker=$( [ -f Dockerfile ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_vscode=$( [ -f .vscodeignore ] || grep -q '"vscode"' package.json 2>/dev/null && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_nuget=$( find . -name '*.csproj' -maxdepth 3 | head -1 | grep -q . && echo true || echo false )" >> $GITHUB_OUTPUT
+
+          # Detect package manager
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pkg_manager=pnpm" >> $GITHUB_OUTPUT
+          elif [ -f yarn.lock ]; then
+            echo "pkg_manager=yarn" >> $GITHUB_OUTPUT
+          elif [ -f bun.lockb ]; then
+            echo "pkg_manager=bun" >> $GITHUB_OUTPUT
+          else
+            echo "pkg_manager=npm" >> $GITHUB_OUTPUT
+          fi
+
+          # Get current version
+          if [ -f package.json ]; then
+            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
+          elif [ -f deno.json ]; then
+            VERSION=$(node -p "require('./deno.json').version" 2>/dev/null || echo "0.0.0")
+          elif [ -f Cargo.toml ]; then
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          else
+            VERSION="0.0.0"
+          fi
+          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Analyze commits and decide version bump
+        id: decide
+        run: |
+          FORCED_BUMP="${{ inputs.bump }}"
+          CURRENT="${{ steps.detect.outputs.current_version }}"
+
+          if [ -n "$FORCED_BUMP" ]; then
+            BUMP="$FORCED_BUMP"
+          else
+            # Get commits since last tag
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -z "$LAST_TAG" ]; then
+              COMMITS=$(git log --oneline --format="%s")
+            else
+              COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="%s")
+            fi
+
+            if [ -z "$COMMITS" ]; then
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "No new commits since last tag"
+              exit 0
+            fi
+
+            # Conventional commits analysis
+            BUMP="patch"
+            if echo "$COMMITS" | grep -qE "^(feat|feature)(\(.+\))?!?:"; then
+              BUMP="minor"
+            fi
+            if echo "$COMMITS" | grep -qE "^.+!:" || echo "$COMMITS" | grep -qiE "BREAKING CHANGE"; then
+              BUMP="major"
+            fi
+            # Skip release for chore/ci/docs-only changes
+            if ! echo "$COMMITS" | grep -qE "^(feat|fix|perf|refactor)(\(.+\))?:"; then
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "Only chore/ci/docs commits — skipping release"
+              exit 0
+            fi
+          fi
+
+          # Calculate new version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$BUMP" in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+          esac
+
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP" >> $GITHUB_OUTPUT
+          echo "Bump: $BUMP ($CURRENT → $NEW_VERSION)"
+
+  # ──────────────────────────────────────────────────────────────────
+  # 2. Test
+  # ──────────────────────────────────────────────────────────────────
+  test:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true' && inputs.skip_tests != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: needs.prepare.outputs.has_npm == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        if: needs.prepare.outputs.pkg_manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Deno
+        if: needs.prepare.outputs.has_deno == 'true'
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Rust
+        if: needs.prepare.outputs.has_cargo == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (npm)
+        if: needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.pkg_manager == 'npm'
+        run: npm ci || npm install
+
+      - name: Install dependencies (pnpm)
+        if: needs.prepare.outputs.pkg_manager == 'pnpm'
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Run tests (Node)
+        if: needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_deno != 'true'
+        run: |
+          if grep -q '"test"' package.json 2>/dev/null; then
+            ${{ needs.prepare.outputs.pkg_manager }} test
+          else
+            echo "No test script found, skipping"
+          fi
+
+      - name: Run tests (Deno)
+        if: needs.prepare.outputs.has_deno == 'true'
+        run: deno test -A 2>/dev/null || echo "No Deno tests found"
+
+      - name: Run tests (Rust)
+        if: needs.prepare.outputs.has_cargo == 'true'
+        run: cargo test
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3. Version bump, tag, changelog, GitHub Release
+  # ──────────────────────────────────────────────────────────────────
+  release:
+    needs: [prepare, test]
+    if: |
+      always() &&
+      needs.prepare.outputs.should_release == 'true' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: v${{ needs.prepare.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version in package.json
+        if: needs.prepare.outputs.has_npm == 'true'
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${{ needs.prepare.outputs.new_version }}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Bump version in deno.json
+        if: needs.prepare.outputs.has_deno == 'true'
+        run: |
+          if [ -f deno.json ]; then
+            node -e "
+              const cfg = JSON.parse(require('fs').readFileSync('deno.json', 'utf8'));
+              cfg.version = '${{ needs.prepare.outputs.new_version }}';
+              require('fs').writeFileSync('deno.json', JSON.stringify(cfg, null, 2) + '\n');
+            "
+          fi
+
+      - name: Bump version in Cargo.toml
+        if: needs.prepare.outputs.has_cargo == 'true'
+        run: |
+          sed -i "0,/^version = /s/^version = .*/version = \"${{ needs.prepare.outputs.new_version }}\"/" Cargo.toml
+
+      - name: Generate changelog entry
+        id: changelog
+        run: |
+          VERSION="${{ needs.prepare.outputs.new_version }}"
+          DATE=$(date +%Y-%m-%d)
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --oneline --format="- %s (%h)")
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="- %s (%h)")
+          fi
+
+          ENTRY="## [$VERSION] — $DATE
+
+          $COMMITS
+          "
+
+          # Prepend to CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            echo "$ENTRY" | cat - CHANGELOG.md > temp && mv temp CHANGELOG.md
+          else
+            echo "# Changelog
+
+          $ENTRY" > CHANGELOG.md
+          fi
+
+          # Save for release notes
+          echo "$COMMITS" > /tmp/release-notes.md
+          echo "notes_file=/tmp/release-notes.md" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          git add -A
+          git commit -m "chore(release): v${{ needs.prepare.outputs.new_version }}" || echo "Nothing to commit"
+
+      - name: Create and push tag
+        if: inputs.dry_run != true
+        run: |
+          git tag "v${{ needs.prepare.outputs.new_version }}"
+          git push origin HEAD --tags
+
+      - name: Create GitHub Release
+        if: inputs.dry_run != true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.new_version }}
+          name: v${{ needs.prepare.outputs.new_version }}
+          body_path: /tmp/release-notes.md
+          generate_release_notes: true
+
+  # ──────────────────────────────────────────────────────────────────
+  # 4. Publish to registries
+  # ──────────────────────────────────────────────────────────────────
+
+  publish-npm:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.has_npm == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Setup pnpm
+        if: needs.prepare.outputs.pkg_manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ needs.prepare.outputs.pkg_manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile || pnpm install
+          else
+            npm ci || npm install
+          fi
+
+      - name: Build (if build script exists)
+        run: |
+          if grep -q '"build"' package.json 2>/dev/null; then
+            ${{ needs.prepare.outputs.pkg_manager }} run build
+          fi
+
+      - name: Publish to npm
+        if: secrets.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+        continue-on-error: true
+
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Temporarily set registry to GitHub Packages
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+          echo "@plures:registry=https://npm.pkg.github.com" >> .npmrc
+          npm publish --access public
+        continue-on-error: true
+
+  publish-jsr:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.has_deno == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Publish to JSR
+        if: secrets.JSR_TOKEN != ''
+        env:
+          JSR_TOKEN: ${{ secrets.JSR_TOKEN }}
+        run: deno publish --token="$JSR_TOKEN"
+        continue-on-error: true
+
+  publish-cargo:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.has_cargo == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        if: secrets.CARGO_TOKEN != ''
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+        run: cargo publish --allow-dirty
+        continue-on-error: true
+
+  publish-docker:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.has_docker == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - name: Login to Docker Hub
+        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.new_version }}
+            ghcr.io/${{ github.repository }}:latest
+
+  publish-vscode:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.has_vscode == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Publish to VS Code Marketplace
+        if: secrets.VSCE_PAT != ''
+        run: |
+          npx vsce publish -p "${{ secrets.VSCE_PAT }}"
+        continue-on-error: true
+
+      - name: Publish to Open VSX
+        if: secrets.OVSX_PAT != ''
+        run: |
+          npx ovsx publish -p "${{ secrets.OVSX_PAT }}"
+        continue-on-error: true

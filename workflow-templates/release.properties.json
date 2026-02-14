@@ -1,0 +1,6 @@
+{
+  "name": "Plures Release Pipeline",
+  "description": "Auto-versioning + multi-registry publish (npm, JSR, Cargo, Docker, VS Code). Detects project type automatically.",
+  "iconName": "rocket",
+  "categories": ["Continuous deployment"]
+}
