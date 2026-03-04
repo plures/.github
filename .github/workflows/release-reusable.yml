@@ -364,7 +364,7 @@ jobs:
         if: true  # publishes to npm if NPM_TOKEN secret exists
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --ignore-scripts --access public
         continue-on-error: true
 
       - name: Publish to GitHub Packages
@@ -374,7 +374,7 @@ jobs:
           # Temporarily set registry to GitHub Packages
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
           echo "@plures:registry=https://npm.pkg.github.com" >> .npmrc
-          npm publish --access public
+          npm publish --ignore-scripts --access public
         continue-on-error: true
 
   publish-jsr:
