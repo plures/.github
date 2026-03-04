@@ -305,8 +305,13 @@ jobs:
       - name: Create and push tag
         if: inputs.dry_run != true
         run: |
-          git tag "v${{ needs.prepare.outputs.new_version }}"
-          git push origin HEAD --tags
+          TAG="v${{ needs.prepare.outputs.new_version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin, skipping tag creation."
+          else
+            git tag "${TAG}"
+            git push origin HEAD --tags
+          fi
 
       - name: Create GitHub Release
         if: inputs.dry_run != true
