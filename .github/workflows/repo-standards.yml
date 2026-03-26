@@ -1,0 +1,206 @@
+name: Repo Standards Enforcement
+
+on:
+  # Run daily at 6 AM UTC (11 PM PDT)
+  schedule:
+    - cron: '0 6 * * *'
+  # Manual trigger — optionally target a single repo
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Specific repo name (blank = scan all)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply standards to org repos
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.COPILOT_PAT }}
+          script: |
+            const owner = 'plures';
+            const targetRepo = '${{ inputs.target_repo }}'.trim();
+
+            // Repos to skip (meta repos, special repos)
+            const SKIP = new Set(['.github', 'development-guide', 'qa']);
+
+            // ── Standard files to ensure exist ──────────────────────────
+            // Each entry: { path, templateFn }
+            // templateFn(repoName) returns file content, or null to use a static file from this repo
+
+            const STANDARD_FILES = [
+              {
+                path: '.github/copilot-instructions.md',
+                description: 'Copilot coding instructions',
+                templatePath: 'templates/copilot-instructions.md',
+              },
+              {
+                path: '.github/copilot-setup-steps.yml',
+                // This is project-type specific — only ensure it exists, don't overwrite
+                skipIfExists: true,
+                description: 'Copilot setup steps',
+              },
+              {
+                path: '.github/workflows/copilot-pr-lifecycle.yml',
+                description: 'Copilot PR auto-merge lifecycle',
+                templatePath: 'templates/copilot-pr-lifecycle.yml',
+              },
+              {
+                path: '.github/workflows/tech-doc-writer.yml',
+                description: 'Auto-create doc issues on PR merge',
+                templatePath: 'templates/tech-doc-writer.yml',
+              },
+              {
+                path: '.github/workflows/release.yml',
+                description: 'Reusable release pipeline',
+                templatePath: 'templates/release.yml',
+              },
+            ];
+
+            // ── Fetch template contents from this repo ──────────────────
+            const templates = {};
+            for (const file of STANDARD_FILES) {
+              if (!file.templatePath) continue;
+              try {
+                const { data } = await github.rest.repos.getContent({
+                  owner, repo: '.github', path: file.templatePath,
+                });
+                templates[file.templatePath] = Buffer.from(data.content, 'base64').toString('utf8');
+              } catch (e) {
+                console.log(`⚠️  Template ${file.templatePath} not found in .github repo — will skip`);
+              }
+            }
+
+            // ── Get repos ───────────────────────────────────────────────
+            let repos;
+            if (targetRepo) {
+              try {
+                const { data } = await github.rest.repos.get({ owner, repo: targetRepo });
+                repos = [data];
+              } catch (e) {
+                core.setFailed(`Repo ${targetRepo} not found`);
+                return;
+              }
+            } else {
+              repos = await github.paginate(github.rest.repos.listForOrg, {
+                org: owner, type: 'sources', per_page: 100,
+              });
+            }
+
+            let applied = 0;
+            let skipped = 0;
+
+            for (const repo of repos) {
+              if (SKIP.has(repo.name)) continue;
+              if (repo.fork) continue;
+              if (repo.archived) continue;
+
+              const repoName = repo.name;
+              const missingFiles = [];
+
+              // Check which standard files are missing
+              for (const file of STANDARD_FILES) {
+                try {
+                  await github.rest.repos.getContent({
+                    owner, repo: repoName, path: file.path,
+                  });
+                  // File exists — skip
+                } catch (e) {
+                  if (e.status === 404) {
+                    if (file.skipIfExists) continue; // We only skip overwrite, but it's missing — we have no template
+                    if (file.templatePath && templates[file.templatePath]) {
+                      missingFiles.push(file);
+                    }
+                  }
+                }
+              }
+
+              if (missingFiles.length === 0) {
+                skipped++;
+                continue;
+              }
+
+              console.log(`📦 ${repoName}: missing ${missingFiles.map(f => f.path).join(', ')}`);
+
+              // Check for existing standards PR
+              const { data: prs } = await github.rest.pulls.list({
+                owner, repo: repoName, state: 'open', head: `${owner}:chore/org-standards`,
+              });
+
+              if (prs.length > 0) {
+                console.log(`  ↳ PR already open (#${prs[0].number}), skipping`);
+                skipped++;
+                continue;
+              }
+
+              // Get default branch
+              const defaultBranch = repo.default_branch;
+
+              // Get HEAD SHA
+              const { data: ref } = await github.rest.git.getRef({
+                owner, repo: repoName, ref: `heads/${defaultBranch}`,
+              });
+              const baseSha = ref.object.sha;
+
+              // Create branch
+              const branchName = 'chore/org-standards';
+              try {
+                await github.rest.git.createRef({
+                  owner, repo: repoName,
+                  ref: `refs/heads/${branchName}`,
+                  sha: baseSha,
+                });
+              } catch (e) {
+                // Branch might already exist from a closed PR — update it
+                try {
+                  await github.rest.git.updateRef({
+                    owner, repo: repoName,
+                    ref: `heads/${branchName}`,
+                    sha: baseSha,
+                    force: true,
+                  });
+                } catch (e2) {
+                  console.log(`  ↳ Failed to create/update branch: ${e2.message}`);
+                  continue;
+                }
+              }
+
+              // Commit each missing file
+              for (const file of missingFiles) {
+                const content = templates[file.templatePath];
+                try {
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner, repo: repoName,
+                    path: file.path,
+                    message: `chore: add ${file.description}`,
+                    content: Buffer.from(content).toString('base64'),
+                    branch: branchName,
+                  });
+                } catch (e) {
+                  console.log(`  ↳ Failed to create ${file.path}: ${e.message}`);
+                }
+              }
+
+              // Create PR
+              const fileList = missingFiles.map(f => `- \`${f.path}\` — ${f.description}`).join('\n');
+              const { data: pr } = await github.rest.pulls.create({
+                owner, repo: repoName,
+                title: 'chore: apply org-standard automation files',
+                body: `## Org Standards Enforcement\n\nThis PR adds missing standard automation files:\n\n${fileList}\n\nThese are required by the plures org standards. See [development-guide](https://github.com/plures/development-guide) for details.\n\n---\n_Auto-generated by [repo-standards](https://github.com/plures/.github/blob/main/.github/workflows/repo-standards.yml)_`,
+                head: branchName,
+                base: defaultBranch,
+              });
+
+              console.log(`  ↳ Created PR #${pr.number}: ${pr.html_url}`);
+              applied++;
+            }
+
+            console.log(`\n✅ Done. Applied: ${applied}, Already compliant: ${skipped}`);
