@@ -1,0 +1,6 @@
+{
+  "name": "Plures Security Scanning",
+  "description": "CodeQL static analysis + Dependency Review. Blocks PRs that introduce high/critical vulnerabilities. Runs on push, PR, and weekly schedule.",
+  "iconName": "shield",
+  "categories": ["Security"]
+}
