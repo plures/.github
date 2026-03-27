@@ -1,0 +1,6 @@
+{
+  "name": "Plures GitHub Packages (Docker)",
+  "description": "Build a Docker image and publish it to GitHub Container Registry (ghcr.io) with SHA, semver, and latest tags. Includes SBOM and provenance attestation.",
+  "iconName": "container",
+  "categories": ["Continuous deployment", "Security"]
+}
