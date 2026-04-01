@@ -1,0 +1,20 @@
+name: Copilot PR Lifecycle
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize, closed]
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+  issues:
+    types: [opened, labeled]
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  lifecycle:
+    uses: plures/repo-template/.github/workflows/copilot-pr-lifecycle-reusable.yml@main
+    secrets:
+      COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
