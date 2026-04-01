@@ -70,7 +70,7 @@ jobs:
           echo "version=${MSRV:-1.75.0}" >> "$GITHUB_OUTPUT"
 
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
 
@@ -79,7 +79,7 @@ jobs:
 
   release:
     name: Release
-    needs: ci
+    needs: [ci, msrv]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
