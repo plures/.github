@@ -1,0 +1,6 @@
+{
+  "name": "Plures Rust / Cargo CI",
+  "description": "fmt-check, clippy (all warnings as errors), test on Linux/macOS/Windows, MSRV check. Publishes to crates.io on release via the org reusable workflow.",
+  "iconName": "gear",
+  "categories": ["Continuous integration", "Continuous deployment"]
+}

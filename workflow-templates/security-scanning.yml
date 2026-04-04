@@ -1,0 +1,73 @@
+# Security scanning template.
+# Runs CodeQL static analysis and dependency review on every push/PR to main,
+# plus a weekly scheduled scan.
+#
+# CodeQL: detects security vulnerabilities in source code.
+# Dependency Review: blocks PRs that introduce vulnerable dependencies.
+
+name: Security Scanning
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Adjust to match languages used in the repo.
+        # Supported: c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift
+        language: ['javascript-typescript']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Optional: add custom query suites
+          # queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    # Only runs on pull requests — blocks merge if vulnerable deps are introduced
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Fail the workflow if any vulnerability with CVSS score >= 7.0 is found
+          fail-on-severity: high
+          # Post a summary comment on the PR
+          comment-summary-in-pr: always

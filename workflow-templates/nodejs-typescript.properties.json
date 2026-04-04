@@ -1,0 +1,6 @@
+{
+  "name": "Plures Node.js / TypeScript CI",
+  "description": "Lint, type-check, test, and build on Node.js 20 & 22. Publishes to npm and GitHub Packages on release via the org reusable workflow.",
+  "iconName": "package",
+  "categories": ["Continuous integration", "Continuous deployment"]
+}
