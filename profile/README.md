@@ -4,7 +4,7 @@
 
 # Welcome to Plures
 
-**Building Tools for Modern Development**
+**Decentralized Commerce Platform · P2P Development Tools**
 
 [![GitHub Organization](https://img.shields.io/badge/GitHub-plures-181717?style=flat&logo=github)](https://github.com/plures)
 [![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-ff69b4?style=flat)](https://opensource.org/)
@@ -18,9 +18,9 @@
 
 ## 🚀 Who We Are
 
-**Plures** is dedicated to creating innovative development tools and solutions that empower software engineers to build better software, faster. We believe in the power of open source, community collaboration, and continuous innovation.
+**Plures** builds the **Pares ecosystem**—a decentralized commerce platform and P2P development toolchain that puts creators and developers first. We are shifting the economics of software distribution: from platform-controlled marketplaces to peer-to-peer networks where creators keep 90% of their revenue.
 
-Our mission is to streamline development workflows, enhance productivity, and provide developers with the tools they need to focus on what matters most—creating exceptional software.
+Our mission is to provide the infrastructure and tooling that makes decentralized, local-first development the default—starting with Pares Cache, a free P2P Nix binary cache, and growing into the Pares Marketplace, a universal content marketplace for software, assets, and services.
 
 <div align="center">
 
@@ -29,11 +29,11 @@ Our mission is to streamline development workflows, enhance productivity, and pr
 <table>
 <tr>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-development.svg" width="80" alt="Developer-First">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-development.svg" width="80" alt="Creator-First">
 <br><br>
-<strong>Developer-First</strong>
+<strong>Creator-First</strong>
 <br>
-<sub>Built by developers, for developers. We understand your workflow.</sub>
+<sub>90% revenue to creators. Decentralized economics, not platform lock-in.</sub>
 </td>
 <td align="center" width="25%">
 <img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-opensource.svg" width="80" alt="Open Source">
@@ -43,11 +43,11 @@ Our mission is to streamline development workflows, enhance productivity, and pr
 <sub>Transparent, collaborative, and community-driven development.</sub>
 </td>
 <td align="center" width="25%">
-<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-innovation.svg" width="80" alt="Innovation">
+<img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-innovation.svg" width="80" alt="P2P-Native">
 <br><br>
-<strong>Innovation</strong>
+<strong>P2P-Native</strong>
 <br>
-<sub>Pushing boundaries with cutting-edge tools and technologies.</sub>
+<sub>Local-first, offline-capable, peer-to-peer by default—no central gatekeepers.</sub>
 </td>
 <td align="center" width="25%">
 <img src="https://raw.githubusercontent.com/plures/.github/main/assets/images/icon-quality.svg" width="80" alt="Quality">
@@ -65,19 +65,33 @@ Our mission is to streamline development workflows, enhance productivity, and pr
 
 ## 🌟 Featured Projects
 
-### [Azure DevOps Integration Extension](https://github.com/plures/azuredevops-integration-extension)
+### [Pares Cache](https://github.com/plures/pares-cache)
 
-A powerful VS Code extension that brings Azure DevOps directly into your development environment.
+A **free, P2P Nix binary cache** — the install-base wedge for the Pares ecosystem. Pares Cache lets teams share build artifacts over a decentralized peer-to-peer network, eliminating the need for costly centralized cache servers.
 
 **Key Features:**
-- 📋 **Work Items Management** - Unified view with smart filters and custom WIQL support
-- ⏱️ **Time Tracking** - Lightweight timer with auto-pause and status bar integration
-- 🔀 **Git Integration** - Create branches and PRs directly from work items
-- 🤖 **AI-Powered Summaries** - Generate work summaries using Copilot or OpenAI
-- 📊 **Multiple Views** - Switch between list and Kanban views seamlessly
-- 🔐 **Secure** - PAT tokens stored securely in VS Code's secret store
+- ⚡ **Zero-Cost Sharing** - Share Nix build artifacts with your team at no infrastructure cost
+- 🌐 **P2P Distribution** - Powered by Hyperswarm for truly decentralized artifact distribution
+- 🔒 **Cryptographic Verification** - Every artifact is signed and verified
+- 🚀 **Drop-In Replacement** - Works with existing Nix workflows and `nix.conf` cache settings
+- 📦 **Local-First** - Full functionality offline; syncs automatically when peers are available
 
-[📦 Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=PluresLLC.azure-devops-integration-extension) | [📖 Documentation](https://github.com/plures/azuredevops-integration-extension#readme)
+[📖 Documentation](https://github.com/plures/pares-cache#readme)
+
+---
+
+### [Pares Marketplace](https://github.com/plures/pares-marketplace)
+
+A **universal content marketplace** built on decentralized infrastructure. Pares Marketplace enables creators to sell software, assets, templates, and services with **90% revenue retention**—compared to the 30–50% taken by traditional platforms.
+
+**Key Features:**
+- 💰 **90% Creator Revenue** - Minimal platform fees; creators keep what they earn
+- 🛒 **Universal Content** - Software packages, design assets, templates, services, and more
+- 🔑 **Decentralized Ownership** - Content stored and distributed peer-to-peer via Hyperswarm
+- 🤝 **Trustless Commerce** - Cryptographic proofs for license verification, no central authority
+- 🌍 **Global Reach** - P2P network means no geographic restrictions or platform availability risk
+
+[📖 Documentation](https://github.com/plures/pares-marketplace#readme)
 
 ---
 
@@ -95,19 +109,19 @@ An experimental project exploring real-time, decentralized data synchronization 
 
 ## 💡 What We Build
 
-At Plures, we focus on creating tools that solve real-world development challenges:
+At Plures, we focus on decentralized infrastructure and creator-first commerce tools:
 
-### Development Tools & Extensions
-Enhance your IDE and development workflow with powerful integrations and productivity boosters.
+### Pares Cache — P2P Nix Binary Cache
+Free, peer-to-peer Nix binary cache that eliminates centralized infrastructure costs and forms the install base for the Pares ecosystem.
 
-### Integration Solutions
-Connect your favorite tools and services seamlessly with well-designed integration layers.
+### Pares Marketplace — Decentralized Commerce
+Universal content marketplace where creators retain 90% of revenue. Supports software, assets, templates, and services distributed over P2P networks.
 
-### Modern Web Technologies
-Leverage cutting-edge frameworks and architectures for building scalable applications.
+### P2P Infrastructure (Hyperswarm / PluresDB)
+Core networking and database primitives enabling local-first, offline-capable applications with automatic P2P sync.
 
-### Developer Experience
-Prioritize DX (Developer Experience) in everything we create—from APIs to documentation.
+### Developer Tooling
+Rust-based CLI tools, Tauri desktop apps, and Svelte 5 UI components that power the Pares ecosystem and integrate with standard developer workflows.
 
 ---
 
@@ -115,13 +129,13 @@ Prioritize DX (Developer Experience) in everything we create—from APIs to docu
 
 <div align="center">
 
+![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![Svelte](https://img.shields.io/badge/Svelte-FF3E00?style=for-the-badge&logo=svelte&logoColor=white)
-![VS Code](https://img.shields.io/badge/VS%20Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)
+![Nix](https://img.shields.io/badge/Nix-5277C3?style=for-the-badge&logo=nixos&logoColor=white)
+![Tauri](https://img.shields.io/badge/Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
-![Azure DevOps](https://img.shields.io/badge/Azure%20DevOps-0078D7?style=for-the-badge&logo=azuredevops&logoColor=white)
 
 </div>
 
@@ -169,7 +183,7 @@ Our projects are primarily licensed under the **MIT License**, promoting open co
 
 **Made with ❤️ by the Plures team**
 
-<sub>Building the future of development tools, one commit at a time.</sub>
+<sub>Building the future of decentralized commerce, one commit at a time.</sub>
 
 ---
 
