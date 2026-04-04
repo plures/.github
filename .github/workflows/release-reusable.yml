@@ -95,14 +95,22 @@ jobs:
             echo "pkg_manager=npm" >> $GITHUB_OUTPUT
           fi
 
-          # Get current version
-          if [ -f package.json ]; then
-            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
-          elif [ -f deno.json ]; then
-            VERSION=$(node -p "require('./deno.json').version" 2>/dev/null || echo "0.0.0")
-          elif [ -f Cargo.toml ]; then
+          # Get current version (Cargo.toml first for Rust projects — package.json may lack version)
+          VERSION=""
+          if [ -f Cargo.toml ] && grep -q '^\[workspace\.package\]' Cargo.toml; then
+            VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          elif [ -f Cargo.toml ] && grep -q '^version' Cargo.toml; then
             VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          else
+          fi
+          if [ -z "$VERSION" ] && [ -f package.json ]; then
+            VERSION=$(node -p "require('./package.json').version || ''" 2>/dev/null || echo "")
+          fi
+          if [ -z "$VERSION" ] && [ -f deno.json ]; then
+            VERSION=$(node -p "require('./deno.json').version || ''" 2>/dev/null || echo "")
+          fi
+          # Validate semver (major.minor.patch) — reject garbage like "undefined.3.1"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "⚠️ Invalid version '$VERSION' — falling back to 0.0.0"
             VERSION="0.0.0"
           fi
           echo "current_version=$VERSION" >> $GITHUB_OUTPUT
@@ -264,7 +272,12 @@ jobs:
       - name: Bump version in Cargo.toml
         if: needs.prepare.outputs.has_cargo == 'true'
         run: |
-          sed -i "0,/^version = /s/^version = .*/version = \"${{ needs.prepare.outputs.new_version }}\"/" Cargo.toml
+          # Handle [workspace.package] version vs top-level version
+          if grep -q '^\[workspace\.package\]' Cargo.toml; then
+            sed -i '/^\[workspace\.package\]/,/^\[/{s/^version = .*/version = "${{ needs.prepare.outputs.new_version }}"/}' Cargo.toml
+          else
+            sed -i "0,/^version = /s/^version = .*/version = \"${{ needs.prepare.outputs.new_version }}\"/" Cargo.toml
+          fi
 
       - name: Generate changelog entry
         id: changelog
