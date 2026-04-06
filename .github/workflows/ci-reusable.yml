@@ -1,0 +1,300 @@
+name: Plures CI Pipeline
+
+# Reusable CI workflow for all plures org repos.
+# Auto-detects project type (Node/Rust/Deno/hybrid) and runs appropriate checks.
+#
+# USAGE in your repo's .github/workflows/ci.yml:
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: [main, "copilot/**", "feature/**"]
+#     pull_request:
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: plures/.github/.github/workflows/ci-reusable.yml@main
+#       with:
+#         # All inputs are optional — auto-detection handles most cases
+#         # node_version: 'lts/*'
+#         # rust_components: 'clippy,rustfmt'
+#         # extra_apt_packages: 'libwebkit2gtk-4.1-dev libgtk-3-dev'
+#         # cargo_extra_check: 'cargo check --manifest-path crates/tauri-app/Cargo.toml'
+#         # skip_lint: true
+#         # skip_test: true
+#         # skip_build: true
+#         # tsconfig: 'tsconfig.ci.json'
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node.js version (default: lts/*)"
+        required: false
+        type: string
+        default: "lts/*"
+      rust_components:
+        description: "Comma-separated Rust components (default: clippy,rustfmt)"
+        required: false
+        type: string
+        default: "clippy,rustfmt"
+      extra_apt_packages:
+        description: "Extra apt packages for Rust builds (e.g. Tauri system deps)"
+        required: false
+        type: string
+        default: ""
+      cargo_extra_check:
+        description: "Extra cargo check commands (newline-separated)"
+        required: false
+        type: string
+        default: ""
+      cargo_check_flags:
+        description: "Flags for cargo check (default: --workspace)"
+        required: false
+        type: string
+        default: "--workspace"
+      cargo_test_flags:
+        description: "Flags for cargo test (default: --workspace)"
+        required: false
+        type: string
+        default: "--workspace"
+      cargo_clippy_flags:
+        description: "Flags for cargo clippy (default: --workspace --all-targets -- -D warnings)"
+        required: false
+        type: string
+        default: "--workspace --all-targets -- -D warnings"
+      skip_lint:
+        description: "Skip lint step"
+        required: false
+        type: boolean
+        default: false
+      skip_test:
+        description: "Skip test step"
+        required: false
+        type: boolean
+        default: false
+      skip_build:
+        description: "Skip build step"
+        required: false
+        type: boolean
+        default: false
+      skip_fmt:
+        description: "Skip format check step"
+        required: false
+        type: boolean
+        default: false
+      skip_typecheck:
+        description: "Skip TypeScript type-check step"
+        required: false
+        type: boolean
+        default: false
+      skip_audit:
+        description: "Skip security audit step"
+        required: false
+        type: boolean
+        default: false
+      tsconfig:
+        description: "TypeScript config file for type-checking (default: tsconfig.json)"
+        required: false
+        type: string
+        default: "tsconfig.json"
+      wasm_targets:
+        description: "WASM crates to check (newline-separated cargo check commands)"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Detect project type
+  # ──────────────────────────────────────────────────────────────────
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_node: ${{ steps.detect.outputs.has_node }}
+      has_rust: ${{ steps.detect.outputs.has_rust }}
+      has_deno: ${{ steps.detect.outputs.has_deno }}
+      pkg_manager: ${{ steps.detect.outputs.pkg_manager }}
+      has_lint: ${{ steps.detect.outputs.has_lint }}
+      has_test: ${{ steps.detect.outputs.has_test }}
+      has_build: ${{ steps.detect.outputs.has_build }}
+      has_fmt: ${{ steps.detect.outputs.has_fmt }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect project type
+        id: detect
+        run: |
+          echo "has_node=$( [ -f package.json ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_rust=$( [ -f Cargo.toml ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          echo "has_deno=$( [ -f deno.json ] || [ -f deno.jsonc ] && echo true || echo false )" >> $GITHUB_OUTPUT
+
+          # Detect package manager
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pkg_manager=pnpm" >> $GITHUB_OUTPUT
+          elif [ -f yarn.lock ]; then
+            echo "pkg_manager=yarn" >> $GITHUB_OUTPUT
+          elif [ -f bun.lockb ]; then
+            echo "pkg_manager=bun" >> $GITHUB_OUTPUT
+          else
+            echo "pkg_manager=npm" >> $GITHUB_OUTPUT
+          fi
+
+          # Detect available scripts
+          if [ -f package.json ]; then
+            echo "has_lint=$(node -e "console.log(!!require('./package.json').scripts?.lint)" 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+            echo "has_test=$(node -e "console.log(!!require('./package.json').scripts?.test)" 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+            echo "has_build=$(node -e "console.log(!!require('./package.json').scripts?.build)" 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+            echo "has_fmt=$(node -e "console.log(!!require('./package.json').scripts?.['fmt:check'] || !!require('./package.json').scripts?.['format:check'])" 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+          else
+            echo "has_lint=false" >> $GITHUB_OUTPUT
+            echo "has_test=false" >> $GITHUB_OUTPUT
+            echo "has_build=false" >> $GITHUB_OUTPUT
+            echo "has_fmt=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ──────────────────────────────────────────────────────────────────
+  # Node.js checks (lint, typecheck, test, build)
+  # ──────────────────────────────────────────────────────────────────
+  node:
+    needs: detect
+    if: needs.detect.outputs.has_node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Setup pnpm
+        if: needs.detect.outputs.pkg_manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: |
+          PKG="${{ needs.detect.outputs.pkg_manager }}"
+          case "$PKG" in
+            pnpm) pnpm install --frozen-lockfile || pnpm install ;;
+            yarn) yarn install --frozen-lockfile || yarn install ;;
+            bun)  bun install --frozen-lockfile || bun install ;;
+            *)    npm ci || npm install ;;
+          esac
+
+      - name: Lint
+        if: needs.detect.outputs.has_lint == 'true' && inputs.skip_lint != true
+        run: ${{ needs.detect.outputs.pkg_manager }} run lint
+
+      - name: Format check
+        if: needs.detect.outputs.has_fmt == 'true' && inputs.skip_fmt != true
+        run: ${{ needs.detect.outputs.pkg_manager }} run fmt:check || ${{ needs.detect.outputs.pkg_manager }} run format:check
+
+      - name: Type check
+        if: inputs.skip_typecheck != true
+        run: |
+          if [ -f "${{ inputs.tsconfig }}" ]; then
+            npx tsc -p "${{ inputs.tsconfig }}" --noEmit --skipLibCheck
+          elif [ -f tsconfig.json ]; then
+            npx tsc --noEmit --skipLibCheck
+          else
+            echo "No tsconfig found, skipping type check"
+          fi
+
+      - name: Test
+        if: needs.detect.outputs.has_test == 'true' && inputs.skip_test != true
+        run: ${{ needs.detect.outputs.pkg_manager }} test
+
+      - name: Build
+        if: needs.detect.outputs.has_build == 'true' && inputs.skip_build != true
+        run: ${{ needs.detect.outputs.pkg_manager }} run build
+
+  # ──────────────────────────────────────────────────────────────────
+  # Rust checks (check, fmt, clippy, test)
+  # ──────────────────────────────────────────────────────────────────
+  rust:
+    needs: detect
+    if: needs.detect.outputs.has_rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: ${{ inputs.rust_components }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        if: inputs.extra_apt_packages != ''
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update && break
+            echo "apt-get update attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          for i in 1 2 3; do
+            sudo apt-get install -y ${{ inputs.extra_apt_packages }} && break
+            echo "apt-get install attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+
+      - name: cargo check
+        run: cargo check ${{ inputs.cargo_check_flags }}
+
+      - name: Extra cargo check
+        if: inputs.cargo_extra_check != ''
+        run: |
+          echo "${{ inputs.cargo_extra_check }}" | while IFS= read -r cmd; do
+            [ -n "$cmd" ] && eval "$cmd"
+          done
+
+      - name: cargo fmt
+        if: inputs.skip_fmt != true
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        if: inputs.skip_lint != true
+        run: cargo clippy ${{ inputs.cargo_clippy_flags }}
+
+      - name: cargo test
+        if: inputs.skip_test != true
+        run: cargo test ${{ inputs.cargo_test_flags }}
+
+  # ──────────────────────────────────────────────────────────────────
+  # WASM checks (optional, for Rust projects with WASM targets)
+  # ──────────────────────────────────────────────────────────────────
+  wasm:
+    needs: detect
+    if: needs.detect.outputs.has_rust == 'true' && inputs.wasm_targets != ''
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: WASM checks
+        run: |
+          echo "${{ inputs.wasm_targets }}" | while IFS= read -r cmd; do
+            [ -n "$cmd" ] && eval "$cmd"
+          done
