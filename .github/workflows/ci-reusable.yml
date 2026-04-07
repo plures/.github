@@ -198,6 +198,10 @@ jobs:
         if: needs.detect.outputs.has_fmt == 'true' && inputs.skip_fmt != true
         run: ${{ needs.detect.outputs.pkg_manager }} run fmt:check || ${{ needs.detect.outputs.pkg_manager }} run format:check
 
+      - name: Build
+        if: needs.detect.outputs.has_build == 'true' && inputs.skip_build != true
+        run: ${{ needs.detect.outputs.pkg_manager }} run build
+
       - name: Type check
         if: inputs.skip_typecheck != true
         run: |
@@ -212,10 +216,6 @@ jobs:
       - name: Test
         if: needs.detect.outputs.has_test == 'true' && inputs.skip_test != true
         run: ${{ needs.detect.outputs.pkg_manager }} test
-
-      - name: Build
-        if: needs.detect.outputs.has_build == 'true' && inputs.skip_build != true
-        run: ${{ needs.detect.outputs.pkg_manager }} run build
 
   # ──────────────────────────────────────────────────────────────────
   # Rust checks (check, fmt, clippy, test)
