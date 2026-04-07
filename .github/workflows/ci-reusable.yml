@@ -257,9 +257,9 @@ jobs:
       - name: Extra cargo check
         if: inputs.cargo_extra_check != ''
         run: |
-          echo "${{ inputs.cargo_extra_check }}" | while IFS= read -r cmd; do
+          while IFS= read -r cmd || [ -n "$cmd" ]; do
             [ -n "$cmd" ] && eval "$cmd"
-          done
+          done <<< "${{ inputs.cargo_extra_check }}"
 
       - name: cargo fmt
         if: inputs.skip_fmt != true
