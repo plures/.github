@@ -226,6 +226,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@v4
 
@@ -234,25 +236,28 @@ jobs:
         with:
           components: ${{ inputs.rust_components }}
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies
+      - name: Cache apt packages
         if: inputs.extra_apt_packages != ''
-        run: |
-          for i in 1 2 3; do
-            sudo apt-get update && break
-            echo "apt-get update attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
-          for i in 1 2 3; do
-            sudo apt-get install -y ${{ inputs.extra_apt_packages }} && break
-            echo "apt-get install attempt $i failed, retrying in 15s..."
-            sleep 15
-          done
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ${{ inputs.extra_apt_packages }}
+          version: 1.0
 
-      - name: cargo check
-        run: cargo check ${{ inputs.cargo_check_flags }}
+      # ── Fail fast: fmt check is instant ──
+      - name: cargo fmt
+        if: inputs.skip_fmt != true
+        run: cargo fmt --all -- --check
+
+      # ── Single compilation pass: clippy subsumes check ──
+      - name: cargo clippy
+        if: inputs.skip_lint != true
+        run: cargo clippy ${{ inputs.cargo_clippy_flags }}
 
       - name: Extra cargo check
         if: inputs.cargo_extra_check != ''
@@ -260,14 +265,6 @@ jobs:
           while IFS= read -r cmd || [ -n "$cmd" ]; do
             [ -n "$cmd" ] && eval "$cmd"
           done <<< "${{ inputs.cargo_extra_check }}"
-
-      - name: cargo fmt
-        if: inputs.skip_fmt != true
-        run: cargo fmt --all -- --check
-
-      - name: cargo clippy
-        if: inputs.skip_lint != true
-        run: cargo clippy ${{ inputs.cargo_clippy_flags }}
 
       - name: cargo test
         if: inputs.skip_test != true
