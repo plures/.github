@@ -247,9 +247,11 @@ jobs:
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.7
+        continue-on-error: true  # sccache is optimization, not requirement
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true  # cache miss is slow, not fatal
 
       - name: Cache apt packages
         if: inputs.extra_apt_packages != ''
@@ -275,7 +277,13 @@ jobs:
       # ── Single compilation pass: clippy subsumes check ──
       - name: cargo clippy
         if: inputs.skip_lint != true
-        run: cargo clippy ${{ inputs.cargo_clippy_flags }}
+        run: |
+          # If sccache is broken (transient cache failure), disable it and retry
+          if ! cargo clippy ${{ inputs.cargo_clippy_flags }} 2>&1; then
+            echo "⚠️ Clippy failed — retrying without sccache"
+            unset RUSTC_WRAPPER
+            cargo clippy ${{ inputs.cargo_clippy_flags }}
+          fi
 
       - name: Extra cargo check
         if: inputs.cargo_extra_check != ''
@@ -286,7 +294,12 @@ jobs:
 
       - name: cargo test
         if: inputs.skip_test != true
-        run: cargo test ${{ inputs.cargo_test_flags }}
+        run: |
+          if ! cargo test ${{ inputs.cargo_test_flags }} 2>&1; then
+            echo "⚠️ Test failed — retrying without sccache"
+            unset RUSTC_WRAPPER
+            cargo test ${{ inputs.cargo_test_flags }}
+          fi
 
   # ──────────────────────────────────────────────────────────────────
   # WASM checks (optional, for Rust projects with WASM targets)
