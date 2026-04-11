@@ -194,9 +194,18 @@ jobs:
         if: needs.detect.outputs.has_lint == 'true' && inputs.skip_lint != true
         run: ${{ needs.detect.outputs.pkg_manager }} run lint
 
-      - name: Format check
+      - name: Format (auto-fix)
         if: needs.detect.outputs.has_fmt == 'true' && inputs.skip_fmt != true
-        run: ${{ needs.detect.outputs.pkg_manager }} run fmt:check || ${{ needs.detect.outputs.pkg_manager }} run format:check
+        run: |
+          ${{ needs.detect.outputs.pkg_manager }} run fmt 2>/dev/null || ${{ needs.detect.outputs.pkg_manager }} run format 2>/dev/null || true
+          if ! git diff --quiet; then
+            echo "📝 Auto-formatted code"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "style: auto-format code"
+            git push
+          fi
 
       - name: Build
         if: needs.detect.outputs.has_build == 'true' && inputs.skip_build != true
@@ -249,10 +258,19 @@ jobs:
           packages: ${{ inputs.extra_apt_packages }}
           version: 1.0
 
-      # ── Fail fast: fmt check is instant ──
-      - name: cargo fmt
+      # ── Auto-fix formatting (never block on style) ──
+      - name: cargo fmt (auto-fix)
         if: inputs.skip_fmt != true
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt --all
+          if ! git diff --quiet; then
+            echo "📝 Auto-formatted Rust code"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "style: auto-format Rust code"
+            git push
+          fi
 
       # ── Single compilation pass: clippy subsumes check ──
       - name: cargo clippy
