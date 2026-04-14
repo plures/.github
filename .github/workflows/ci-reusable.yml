@@ -254,7 +254,7 @@ jobs:
         continue-on-error: true  # cache miss is slow, not fatal
 
       - name: Cache apt packages
-        if: inputs.extra_apt_packages != ''
+        if: inputs.extra_apt_packages != '' && !contains(runner.name, 'praxisbot')
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: ${{ inputs.extra_apt_packages }}
