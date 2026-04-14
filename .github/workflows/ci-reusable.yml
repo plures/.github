@@ -232,7 +232,7 @@ jobs:
   rust:
     needs: detect
     if: needs.detect.outputs.has_rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.PREFERRED_RUST_RUNNER || 'ubuntu-latest' }}
     env:
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
