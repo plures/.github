@@ -30,6 +30,11 @@ on:
         required: false
         type: string
         default: ""
+      target_version:
+        description: "Exact version to release (e.g. 1.0.0). Overrides bump logic. Used by milestone-driven releases."
+        required: false
+        type: string
+        default: ""
       dry_run:
         description: "Dry run (skip publishing)"
         required: false
@@ -120,7 +125,22 @@ jobs:
         id: decide
         run: |
           FORCED_BUMP="${{ inputs.bump }}"
+          TARGET_VERSION="${{ inputs.target_version }}"
           CURRENT="${{ steps.detect.outputs.current_version }}"
+
+          # target_version takes highest precedence — milestone-driven releases
+          if [ -n "$TARGET_VERSION" ]; then
+            # Validate semver
+            if ! echo "$TARGET_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+              echo "::error::Invalid target_version '$TARGET_VERSION' — must be semver (e.g. 1.0.0)"
+              exit 1
+            fi
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "new_version=$TARGET_VERSION" >> $GITHUB_OUTPUT
+            echo "bump_type=target" >> $GITHUB_OUTPUT
+            echo "Milestone release: $CURRENT → $TARGET_VERSION"
+            exit 0
+          fi
 
           if [ -n "$FORCED_BUMP" ]; then
             BUMP="$FORCED_BUMP"
@@ -275,6 +295,54 @@ jobs:
             sed -i '/^\[workspace\.package\]/,/^\[/{s/^version = .*/version = "${{ needs.prepare.outputs.new_version }}"/}' Cargo.toml
           else
             sed -i "0,/^version = /s/^version = .*/version = \"${{ needs.prepare.outputs.new_version }}\"/" Cargo.toml
+          fi
+
+      - name: Sync version across all version-bearing files
+        run: |
+          VERSION="${{ needs.prepare.outputs.new_version }}"
+          echo "Syncing version $VERSION across all project files..."
+
+          # Sync tauri.conf.json files (Tauri apps embed version)
+          for conf in $(find . -name 'tauri.conf.json' -not -path '*/node_modules/*' -not -path '*/target/*'); do
+            if [ -f "$conf" ]; then
+              node -e "
+                const fs = require('fs');
+                const cfg = JSON.parse(fs.readFileSync('$conf', 'utf8'));
+                if (cfg.version !== undefined) {
+                  cfg.version = '$VERSION';
+                  fs.writeFileSync('$conf', JSON.stringify(cfg, null, 2) + '\\n');
+                  console.log('  ✓ $conf');
+                }
+              " || true
+            fi
+          done
+
+          # Sync nested package.json files (not root — already handled above)
+          for pkg in $(find . -name 'package.json' -not -path '*/node_modules/*' -not -path '*/target/*' -not -path './package.json' -maxdepth 5); do
+            if [ -f "$pkg" ]; then
+              node -e "
+                const fs = require('fs');
+                const p = JSON.parse(fs.readFileSync('$pkg', 'utf8'));
+                if (p.version && p.version !== '0.0.0') {
+                  p.version = '$VERSION';
+                  fs.writeFileSync('$pkg', JSON.stringify(p, null, 2) + '\\n');
+                  console.log('  ✓ $pkg');
+                }
+              " || true
+            fi
+          done
+
+          # Sync deno.json if it exists and has version
+          if [ -f deno.json ]; then
+            node -e "
+              const fs = require('fs');
+              const cfg = JSON.parse(fs.readFileSync('deno.json', 'utf8'));
+              if (cfg.version) {
+                cfg.version = '$VERSION';
+                fs.writeFileSync('deno.json', JSON.stringify(cfg, null, 2) + '\\n');
+                console.log('  ✓ deno.json');
+              }
+            " || true
           fi
 
       - name: Generate changelog entry
