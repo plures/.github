@@ -1,53 +1,24 @@
-# .github Repository Roadmap
+# .github Roadmap
 
-## Current Status: Active
+## Role in OASIS
+The org .github repo is the governance and delivery standard for OASIS. It centralizes workflow templates, policies, and shared docs that enforce consistent security, quality, and release discipline across every OASIS repository.
 
-The .github repository contains organization-level configuration and branding for the Pares ecosystem. Public profile and docs now reflect Pares ecosystem positioning across all surfaces.
+## Current State
+- Org-level branding and documentation are in place.
+- Initial workflow templates exist but coverage is incomplete.
+- Need stronger standardization and security posture baselines.
 
-## Q1 2026 - Brand Realignment
+## Phase 1 — OASIS Standards Baseline (Now → Q2 2026)
+- Expand workflow template library (Rust, Node, Tauri, Svelte) for consistent CI/CD.
+- Publish repo documentation templates (README, SECURITY, CONTRIBUTING, ADRs).
+- Establish org-wide security policies and default labels.
 
-### February 2026
-- [x] Document current state and design gaps
-- [x] **HIGH PRIORITY**: Update README.md messaging from "GitHub tools" → Pares ecosystem positioning
-- [x] Review and update profile/README.md for consistency
-- [ ] Audit assets/images/ for brand alignment
+## Phase 2 — OASIS Release Discipline (Q3–Q4 2026)
+- Add release automation templates (semantic versioning + changelogs).
+- Provide reusable issue triage + labeling workflows.
+- Standardize SBOM + dependency scanning pipelines.
 
-### March 2026  
-- [ ] Create comprehensive workflow template library
-  - [ ] Node.js/TypeScript + npm publishing template
-  - [ ] Rust + Cargo publishing template
-  - [ ] GitHub Packages template
-  - [ ] Security scanning template (CodeQL, dependency review)
-- [ ] Add repo documentation templates
-  - [ ] Standard README structure
-  - [ ] CONTRIBUTING.md guidelines  
-  - [ ] Security policy template
-
-## Q2 2026 - Template Standardization
-
-### April 2026
-- [ ] Deploy workflow templates across active repos
-- [ ] Establish organization security policies
-- [ ] Implement auto-labeling and issue triage templates
-
-### May-June 2026
-- [ ] Asset refresh aligned with Pares branding
-- [ ] Accessibility audit of visual assets
-- [ ] Documentation review and cleanup
-
-## Dependencies & Blockers
-
-- **Development Guide** publishing (Tuesday rotation) - needed for standardized patterns reference
-- **Pares marketing strategy** finalization - needed for consistent messaging
-- **Design team** asset refresh - needed for visual alignment
-
-## Success Metrics
-
-- All active repos using org workflow templates
-- Consistent branding across Plures ecosystem  
-- Reduced time-to-production for new repos
-- Clear contribution guidelines organization-wide
-
-## Archive Considerations
-
-None - this is core organizational infrastructure that must remain active.
+## Phase 3 — OASIS Ecosystem Governance (2027)
+- Org-wide compliance dashboards for CI health and policy adoption.
+- Automated policy enforcement checks across all repos.
+- Governance playbooks for external contributors and partners.
