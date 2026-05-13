@@ -180,9 +180,15 @@ jobs:
               if (isCopilotPR && failing.length > 0) {
                 const failNames = failing.map(f => f.name).join(', ');
                 const existing = await github.rest.issues.listForRepo({
-                  owner, repo, state: 'open', labels: 'ci-failure', per_page: 20
+                  owner, repo, state: 'open', labels: 'ci-failure', per_page: 100
                 });
-                if (!existing.data.some(i => i.title.includes(`PR #${pr.number}`))) {
+                // Circuit breaker: cap open ci-failure issues at 10 per repo
+                const hasDupForPR = existing.data.some(i => i.title.includes(`PR #${pr.number}`));
+                const atCap = existing.data.length >= 10;
+                if (atCap && !hasDupForPR) {
+                  console.log(`⚠️ Circuit breaker: ${existing.data.length} open ci-failure issues — skipping new issue for PR #${pr.number}`);
+                }
+                if (!hasDupForPR && !atCap) {
                   const issue = await github.rest.issues.create({
                     owner, repo,
                     title: `[ci-feedback] Fix CI failures on PR #${pr.number}`,
