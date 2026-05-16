@@ -389,7 +389,7 @@ jobs:
             echo "Tag ${TAG} already exists on origin, skipping tag creation."
           else
             git tag "${TAG}"
-            git push origin HEAD --tags
+            git push origin HEAD:${{ github.ref_name }} --tags
           fi
 
       - name: Create GitHub Release
