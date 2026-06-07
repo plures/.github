@@ -279,8 +279,12 @@ jobs:
         if: inputs.skip_lint != true
         run: |
           # If sccache is broken (transient cache failure), disable it and retry
-          if ! cargo clippy ${{ inputs.cargo_clippy_flags }} 2>&1; then
-            echo "⚠️ Clippy failed — retrying without sccache"
+          set +e
+          cargo clippy ${{ inputs.cargo_clippy_flags }}
+          CLIPPY_EXIT=$?
+          set -e
+          if [ $CLIPPY_EXIT -ne 0 ]; then
+            echo "⚠️ Clippy failed (exit $CLIPPY_EXIT) — retrying without sccache"
             unset RUSTC_WRAPPER
             cargo clippy ${{ inputs.cargo_clippy_flags }}
           fi
@@ -296,8 +300,12 @@ jobs:
         if: inputs.skip_test != true
         continue-on-error: ${{ contains(runner.name, 'praxisbot') }}
         run: |
-          if ! cargo test ${{ inputs.cargo_test_flags }} 2>&1; then
-            echo "⚠️ Test failed — retrying without sccache"
+          set +e
+          cargo test ${{ inputs.cargo_test_flags }}
+          TEST_EXIT=$?
+          set -e
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "⚠️ Test failed (exit $TEST_EXIT) — retrying without sccache"
             unset RUSTC_WRAPPER
             cargo test ${{ inputs.cargo_test_flags }}
           fi
