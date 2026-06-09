@@ -446,7 +446,12 @@ jobs:
         if: true  # publishes to npm if NPM_TOKEN secret exists
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --ignore-scripts --access public
+        # --provenance: attaches OIDC-based provenance attestation linking the
+        # published package to this GitHub Actions workflow run. Requires
+        # id-token: write permission (set at workflow level). Once npm packages
+        # are configured to trust this repo as a "Trusted Publisher", provenance
+        # enables keyless publishing without static NPM_TOKEN.
+        run: npm publish --ignore-scripts --access public --provenance
         continue-on-error: true
 
       - name: Publish to GitHub Packages
