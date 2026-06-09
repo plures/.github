@@ -67,6 +67,7 @@ jobs:
       bump_type: ${{ steps.decide.outputs.bump_type }}
       current_version: ${{ steps.detect.outputs.current_version }}
       has_npm: ${{ steps.detect.outputs.has_npm }}
+      has_napi: ${{ steps.detect.outputs.has_napi }}
       has_deno: ${{ steps.detect.outputs.has_deno }}
       has_cargo: ${{ steps.detect.outputs.has_cargo }}
       has_docker: ${{ steps.detect.outputs.has_docker }}
@@ -83,6 +84,14 @@ jobs:
         run: |
           # Detect what kind of project this is
           echo "has_npm=$( [ -f package.json ] && echo true || echo false )" >> $GITHUB_OUTPUT
+          # Detect NAPI native module projects (they have their own build/publish pipeline)
+          HAS_NAPI=false
+          if [ -f package.json ]; then
+            if node -e 'const p=JSON.parse(require("fs").readFileSync("package.json","utf8")); process.exit((p.napi !== undefined || (p.devDependencies && p.devDependencies["@napi-rs/cli"])) ? 0 : 1)' 2>/dev/null; then
+              HAS_NAPI=true
+            fi
+          fi
+          echo "has_napi=$HAS_NAPI" >> $GITHUB_OUTPUT
           echo "has_deno=$( [ -f deno.json ] || [ -f deno.jsonc ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "has_cargo=$( [ -f Cargo.toml ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "has_docker=$( [ -f Dockerfile ] && echo true || echo false )" >> $GITHUB_OUTPUT
@@ -407,7 +416,7 @@ jobs:
 
   publish-npm:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_npm == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_napi != 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
