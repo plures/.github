@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: false
+      promote:
+        description: "Promote the current odd/dev line to the next even/stable line (odd -> next even .0). Builds installers."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-reusable-${{ github.repository }}-${{ github.ref_name }}
@@ -65,6 +70,10 @@ jobs:
       should_release: ${{ steps.decide.outputs.should_release }}
       new_version: ${{ steps.decide.outputs.new_version }}
       bump_type: ${{ steps.decide.outputs.bump_type }}
+      is_even: ${{ steps.decide.outputs.is_even }}
+      is_prerelease: ${{ steps.decide.outputs.is_prerelease }}
+      should_build_installers: ${{ steps.decide.outputs.should_build_installers }}
+      parity_law: ${{ steps.detect.outputs.parity_law }}
       current_version: ${{ steps.detect.outputs.current_version }}
       has_npm: ${{ steps.detect.outputs.has_npm }}
       has_napi: ${{ steps.detect.outputs.has_napi }}
@@ -130,6 +139,27 @@ jobs:
           echo "current_version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
 
+          # ── Opt-in even/odd parity law (per-repo, via .plures/release.toml) ──
+          # The parity law (odd=dev/prerelease, even=stable/installers, with guard rails)
+          # applies ONLY to repos that opt in. Libraries/forks/CalVer repos keep plain
+          # conventional-commit SemVer. A repo opts in by either setting `parityLaw = true`
+          # OR `publishPlatformInstallers = true` in .plures/release.toml (installer-bearing
+          # product repos are exactly the ones that need deterministic release lines).
+          PARITY_LAW=false
+          if [ -f .plures/release.toml ]; then
+            if grep -qE '^[[:space:]]*parityLaw[[:space:]]*=[[:space:]]*true' .plures/release.toml \
+               || grep -qE '^[[:space:]]*publishPlatformInstallers[[:space:]]*=[[:space:]]*true' .plures/release.toml; then
+              # explicit parityLaw=false wins as an override even if installers are on
+              if grep -qE '^[[:space:]]*parityLaw[[:space:]]*=[[:space:]]*false' .plures/release.toml; then
+                PARITY_LAW=false
+              else
+                PARITY_LAW=true
+              fi
+            fi
+          fi
+          echo "parity_law=$PARITY_LAW" >> $GITHUB_OUTPUT
+          echo "Parity law (even/odd release lines): $PARITY_LAW"
+
       - name: Analyze commits and decide version bump
         id: decide
         run: |
@@ -152,9 +182,16 @@ jobs:
           fi
 
           if [ -n "$FORCED_BUMP" ]; then
-            BUMP="$FORCED_BUMP"
+            # ── Manual bump override: still parity-correct, but operator-forced ──
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            case "$FORCED_BUMP" in
+              major) NEW_VERSION="$((MAJOR + 1)).1.0"; BUMP="major" ;;   # new major lands on odd
+              minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"; BUMP="minor" ;;
+              patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"; BUMP="patch" ;;
+              *) echo "::error::Invalid bump '$FORCED_BUMP'"; exit 1 ;;
+            esac
           else
-            # Get commits since last tag
+            PARITY_LAW="${{ steps.detect.outputs.parity_law }}"
             LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
             if [ -z "$LAST_TAG" ]; then
               COMMITS=$(git log --oneline --format="%s")
@@ -168,34 +205,115 @@ jobs:
               exit 0
             fi
 
-            # Conventional commits analysis
-            BUMP="patch"
-            if echo "$COMMITS" | grep -qE "^(feat|feature)(\(.+\))?!?:"; then
-              BUMP="minor"
-            fi
-            if echo "$COMMITS" | grep -qE "^.+!:" || echo "$COMMITS" | grep -qiE "BREAKING CHANGE"; then
-              BUMP="major"
-            fi
-            # Skip release for chore/ci/docs-only changes
-            if ! echo "$COMMITS" | grep -qE "^(feat|fix|perf|refactor)(\(.+\))?:"; then
-              echo "should_release=false" >> $GITHUB_OUTPUT
-              echo "Only chore/ci/docs commits — skipping release"
-              exit 0
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+            if [ "$PARITY_LAW" = "true" ]; then
+              # ══ Even/odd minor parity law (OPT-IN via .plures/release.toml) ══
+              # Parity rule (development-guide/practices/even-odd-release-versioning.md):
+              #   ODD minor  = development line  (prerelease, NO installers)
+              #   EVEN minor = stable line       (latest, installers) — fixes/security only
+              PARITY=$((MINOR % 2))   # 0 = even/stable, 1 = odd/dev
+
+              HAS_FEAT=false;     echo "$COMMITS" | grep -qE "^(feat|feature)(\(.+\))?!?:" && HAS_FEAT=true
+              HAS_FIX_PERF=false; echo "$COMMITS" | grep -qE "^(fix|perf)(\(.+\))?:"      && HAS_FIX_PERF=true
+              HAS_BREAKING=false; { echo "$COMMITS" | grep -qE "^.+!:" || echo "$COMMITS" | grep -qiE "BREAKING CHANGE"; } && HAS_BREAKING=true
+              HAS_PROMOTE=false;  echo "$COMMITS" | grep -qE "^release(\(.+\))?:"          && HAS_PROMOTE=true
+              [ "${{ inputs.promote }}" = "true" ] && HAS_PROMOTE=true
+
+              echo "Line $CURRENT parity=$([ $PARITY -eq 0 ] && echo EVEN/stable || echo ODD/dev) | feat=$HAS_FEAT fix/perf=$HAS_FIX_PERF breaking=$HAS_BREAKING promote=$HAS_PROMOTE"
+
+              NEW_VERSION=""; BUMP=""
+              if [ "$HAS_BREAKING" = "true" ]; then
+                # Transition #5: breaking change → next major, lands on ODD (.1.0)
+                NEW_VERSION="$((MAJOR + 1)).1.0"; BUMP="major"
+              elif [ "$PARITY" -eq 0 ]; then
+                # ── EVEN / stable line: fixes + security only ──
+                if [ "$HAS_PROMOTE" = "true" ]; then
+                  echo "::error::Guard rail #4 — cannot promote line ${MAJOR}.${MINOR}.x: it is already an EVEN/stable line. Promotion is only valid from an odd/dev line."
+                  exit 1
+                fi
+                if [ "$HAS_FEAT" = "true" ]; then
+                  echo "::error::Guard rail #3 — feat: is not allowed on stable line ${MAJOR}.${MINOR}.x. Open the next development line with a 'release(scope): start ${MAJOR}.$((MINOR + 1))' commit (or push the feat to an odd line)."
+                  exit 1
+                fi
+                if [ "$HAS_FIX_PERF" = "true" ]; then
+                  # Transition #2: fix/security on stable → patch bump (installers rebuild)
+                  NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"; BUMP="patch"
+                else
+                  echo "should_release=false" >> $GITHUB_OUTPUT
+                  echo "Only chore/ci/docs commits on stable line — skipping release"
+                  exit 0
+                fi
+              else
+                # ── ODD / development line ──
+                if [ "$HAS_PROMOTE" = "true" ]; then
+                  # Transition #1: feature-complete promotion odd → next EVEN .0 (THE installer-building event)
+                  NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"; BUMP="promote"
+                elif [ "$HAS_FEAT" = "true" ] || [ "$HAS_FIX_PERF" = "true" ]; then
+                  # Transition #4: routine dev → patch bump within the odd line (prerelease only)
+                  NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"; BUMP="patch"
+                else
+                  echo "should_release=false" >> $GITHUB_OUTPUT
+                  echo "Only chore/ci/docs commits on dev line — skipping release"
+                  exit 0
+                fi
+              fi
+            else
+              # ══ Plain Conventional-Commit SemVer (default — libraries, forks, CalVer, non-opted repos) ══
+              # No parity guard rails; preserves historical behavior for every repo that has
+              # not opted into the parity law via .plures/release.toml.
+              BUMP="patch"
+              if echo "$COMMITS" | grep -qE "^(feat|feature)(\(.+\))?!?:"; then
+                BUMP="minor"
+              fi
+              if echo "$COMMITS" | grep -qE "^.+!:" || echo "$COMMITS" | grep -qiE "BREAKING CHANGE"; then
+                BUMP="major"
+              fi
+              # Skip release for chore/ci/docs-only changes
+              if ! echo "$COMMITS" | grep -qE "^(feat|fix|perf|refactor)(\(.+\))?:"; then
+                echo "should_release=false" >> $GITHUB_OUTPUT
+                echo "Only chore/ci/docs commits — skipping release"
+                exit 0
+              fi
+              case "$BUMP" in
+                major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+                minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+                patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              esac
             fi
           fi
 
-          # Calculate new version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          case "$BUMP" in
-            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
-            minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
-            patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-          esac
+          # ── Guard rail #1: never regress — reconcile against the highest existing tag ──
+          HIGHEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+          if [ -n "$HIGHEST_TAG" ]; then
+            IFS='.' read -r HM HN HP <<< "$HIGHEST_TAG"
+            IFS='.' read -r NM NN NP <<< "$NEW_VERSION"
+            HP=$(echo "$HP" | grep -oE '^[0-9]+'); NP=$(echo "$NP" | grep -oE '^[0-9]+')
+            if [ "$NM" -lt "$HM" ] || { [ "$NM" -eq "$HM" ] && [ "$NN" -lt "$HN" ]; } || { [ "$NM" -eq "$HM" ] && [ "$NN" -eq "$HN" ] && [ "$NP" -le "$HP" ]; }; then
+              echo "Computed $NEW_VERSION would not exceed highest tag v$HIGHEST_TAG — bumping patch on the highest tag's line to avoid regression."
+              NEW_VERSION="${HM}.${HN}.$((HP + 1))"
+            fi
+          fi
+
+          # ── Parity outputs: only an opted-in parity repo derives channel/installers from minor parity ──
+          PARITY_LAW="${{ steps.detect.outputs.parity_law }}"
+          FINAL_MINOR=$(echo "$NEW_VERSION" | cut -d. -f2)
+          if [ "$PARITY_LAW" = "true" ] && [ $((FINAL_MINOR % 2)) -eq 0 ]; then
+            IS_EVEN=true;  IS_PRERELEASE=false; BUILD_INSTALLERS=true
+          elif [ "$PARITY_LAW" = "true" ]; then
+            IS_EVEN=false; IS_PRERELEASE=true;  BUILD_INSTALLERS=false
+          else
+            # Non-parity repo: ordinary stable release, never installer-bearing.
+            IS_EVEN=false; IS_PRERELEASE=false; BUILD_INSTALLERS=false
+          fi
 
           echo "should_release=true" >> $GITHUB_OUTPUT
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "bump_type=$BUMP" >> $GITHUB_OUTPUT
-          echo "Bump: $BUMP ($CURRENT → $NEW_VERSION)"
+          echo "is_even=$IS_EVEN" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "should_build_installers=$BUILD_INSTALLERS" >> $GITHUB_OUTPUT
+          echo "Decision: $CURRENT → $NEW_VERSION ($BUMP) | even=$IS_EVEN prerelease=$IS_PRERELEASE installers=$BUILD_INSTALLERS"
 
   # ──────────────────────────────────────────────────────────────────
   # 2. Test
