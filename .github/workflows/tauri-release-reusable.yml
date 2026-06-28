@@ -59,6 +59,12 @@ on:
         required: false
       APPLE_TEAM_ID:
         required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      ANDROID_KEY_BASE64:
+        required: false
 
 permissions:
   contents: write
@@ -139,6 +145,7 @@ jobs:
           targets: ${{ matrix.rust_target }}
 
       - name: Rust cache
+        id: rustcache
         if: steps.gate.outputs.run == 'true'
         uses: Swatinem/rust-cache@v2
         with:
@@ -166,6 +173,12 @@ jobs:
         if: steps.gate.outputs.run == 'true' && inputs.frontend_build != ''
         run: ${{ inputs.frontend_build }}
 
+      - name: Record build start
+        id: bstart
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: echo "epoch=$(date +%s)" >> $GITHUB_OUTPUT
+
       - name: Build + upload Tauri bundles
         if: steps.gate.outputs.run == 'true'
         uses: tauri-apps/tauri-action@v0
@@ -187,6 +200,38 @@ jobs:
           # release-reusable.yml already created. tauri-action finds it by tagName.
           tagName: v${{ inputs.version }}
           args: ${{ matrix.args }}
+
+      - name: Cache + build metrics
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          END=$(date +%s)
+          DUR=$(( END - ${{ steps.bstart.outputs.epoch }} ))
+          HIT='${{ steps.rustcache.outputs.cache-hit }}'
+          [ -z "$HIT" ] && HIT=false
+          mkdir -p metrics
+          # One JSON record per matrix leg; collected by the metrics-summary job.
+          printf '{"leg":"%s","triple":"%s","runner":"%s","cache_hit":%s,"build_seconds":%s,"version":"%s"}\n' \
+            "${{ matrix.label }}" "${{ matrix.rust_target }}" "${{ matrix.runner }}" "$HIT" "$DUR" "${{ inputs.version }}" \
+            > "metrics/${{ matrix.rust_target }}.json"
+          {
+            echo "### 📦 ${{ matrix.label }}"
+            echo ""
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| rust cache hit | $HIT |"
+            echo "| build seconds | $DUR |"
+            echo "| triple | ${{ matrix.rust_target }} |"
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload leg metrics
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-metrics-${{ matrix.rust_target }}
+          path: metrics/*.json
+          retention-days: 90
+          if-no-files-found: ignore
 
   # ── Flatpak (post-step over the Linux deb) ──
   flatpak:
@@ -272,3 +317,296 @@ jobs:
           fi
           nix build .#default --print-build-logs
           echo "NixOS flake package built: $(readlink -f result || echo result)"
+
+  # ── Android (DORMANT until "android" added to platformTargets + signing secrets present) ──
+  # Historically the #1 timeout source: cold NDK download + Gradle/AGP build across up to 4 ABIs.
+  # All cache layers (SDK/NDK, Gradle, per-ABI Cargo, pnpm) are wired so warm builds are fast.
+  # Step timeout raised to 60m to survive a legitimately-slow cold compile.
+  android:
+    name: android (apk/aab)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check android requested
+        id: gate
+        shell: bash
+        run: |
+          if echo '${{ inputs.platform_targets }}' | grep -q '"android"'; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+            echo "::notice::android not in platformTargets - skipping (held until build-caching proven)."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install Linux system deps
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev patchelf
+
+      - name: Setup Java (Temurin 17)
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        if: steps.gate.outputs.run == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Android SDK + NDK packages
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk
+            ${{ env.ANDROID_HOME }}/platforms
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: android-sdk-${{ runner.os }}-${{ hashFiles('src-tauri/gen/android/**/build.gradle*', 'src-tauri/gen/android/**/*.properties') }}
+          restore-keys: |
+            android-sdk-${{ runner.os }}-
+
+      - name: Cache Gradle
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('src-tauri/gen/android/**/*.gradle*', 'src-tauri/gen/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Setup Rust (Android targets)
+        if: steps.gate.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust cache (Android, per-ABI)
+        if: steps.gate.outputs.run == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-abis
+          cache-on-failure: true
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: pnpm
+
+      - name: Install frontend deps
+        if: steps.gate.outputs.run == 'true'
+        run: ${{ inputs.frontend_install }}
+
+      - name: Build Android (apk + aab)
+        if: steps.gate.outputs.run == 'true'
+        env:
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+        run: |
+          if [ ! -d src-tauri/gen/android ]; then
+            echo "::warning::src-tauri/gen/android missing - run 'pnpm tauri android init' and commit gen/android first. Skipping."
+            exit 0
+          fi
+          START=$(date +%s)
+          pnpm tauri android build
+          echo "android build seconds: $(( $(date +%s) - START ))"
+
+      - name: Upload Android artifacts to release
+        if: steps.gate.outputs.run == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          files: |
+            src-tauri/gen/android/app/build/outputs/**/*.apk
+            src-tauri/gen/android/app/build/outputs/**/*.aab
+        continue-on-error: true
+
+  # ── iOS (DORMANT until "ios" added to platformTargets + Apple creds present) ──
+  # Needs macOS + full Xcode + CocoaPods. Cold pod install + SwiftPM resolve + Xcode build is slow;
+  # CocoaPods/SwiftPM/per-arch-Cargo/pnpm caches wired, step timeout raised to 60m.
+  ios:
+    name: ios (ipa)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Check ios requested
+        id: gate
+        shell: bash
+        run: |
+          if echo '${{ inputs.platform_targets }}' | grep -q '"ios"'; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+            echo "::notice::ios not in platformTargets - skipping (held until build-caching proven + Apple creds)."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Setup Rust (iOS targets)
+        if: steps.gate.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,x86_64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Rust cache (iOS, per-arch)
+        if: steps.gate.outputs.run == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-arches
+          cache-on-failure: true
+
+      - name: Cache CocoaPods + SwiftPM
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            src-tauri/gen/apple/Pods
+            ~/Library/Caches/org.swift.swiftpm
+          key: ios-pods-spm-${{ runner.os }}-${{ hashFiles('src-tauri/gen/apple/**/Podfile.lock', 'src-tauri/gen/apple/**/Package.resolved') }}
+          restore-keys: |
+            ios-pods-spm-${{ runner.os }}-
+
+      - name: Ensure CocoaPods
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          if ! command -v pod >/dev/null 2>&1; then brew install cocoapods; fi
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: pnpm
+
+      - name: Install frontend deps
+        if: steps.gate.outputs.run == 'true'
+        run: ${{ inputs.frontend_install }}
+
+      - name: Build iOS (ipa)
+        if: steps.gate.outputs.run == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ ! -d src-tauri/gen/apple ]; then
+            echo "::warning::src-tauri/gen/apple missing - run 'pnpm tauri ios init' and commit gen/apple first. Skipping."
+            exit 0
+          fi
+          START=$(date +%s)
+          pnpm tauri ios build
+          echo "ios build seconds: $(( $(date +%s) - START ))"
+
+      - name: Upload iOS artifacts to release
+        if: steps.gate.outputs.run == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          files: |
+            src-tauri/gen/apple/build/**/*.ipa
+        continue-on-error: true
+
+  # ── Metrics summary: consolidate per-leg cache/build metrics + track savings over time ──
+  # Directive B: build-caching must show MEASURED savings that persist across builds.
+  # Each desktop leg uploads a build-metrics-<triple> artifact; this job aggregates them,
+  # renders a run-level table, and appends a rolling JSONL to the orphan 'ci-metrics' branch
+  # so cold-vs-warm build deltas are queryable historically (no external infra).
+  metrics-summary:
+    name: cache/build metrics
+    needs: [desktop]
+    if: always()
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all leg metrics
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-metrics-*
+          path: incoming
+          merge-multiple: true
+
+      - name: Render run summary
+        shell: bash
+        run: |
+          shopt -s nullglob
+          FILES=(incoming/*.json)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No build metrics this run (no installer legs ran)." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          {
+            echo "## 📊 Build cache metrics — v${{ inputs.version }}"
+            echo ""
+            echo "| leg | triple | cache hit | build s |"
+            echo "|---|---|---|---|"
+          } >> $GITHUB_STEP_SUMMARY
+          TOTAL=0
+          for f in "${FILES[@]}"; do
+            LEG=$(grep -o '"leg":"[^"]*"' "$f" | cut -d'"' -f4)
+            TRIPLE=$(grep -o '"triple":"[^"]*"' "$f" | cut -d'"' -f4)
+            HIT=$(grep -o '"cache_hit":[a-z]*' "$f" | cut -d: -f2)
+            DUR=$(grep -o '"build_seconds":[0-9]*' "$f" | cut -d: -f2)
+            echo "| $LEG | $TRIPLE | $HIT | $DUR |" >> $GITHUB_STEP_SUMMARY
+            TOTAL=$(( TOTAL + DUR ))
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total installer build time: ${TOTAL}s** across ${#FILES[@]} legs." >> $GITHUB_STEP_SUMMARY
+
+      - name: Append to rolling metrics history (ci-metrics branch)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          FILES=(incoming/*.json)
+          [ ${#FILES[@]} -eq 0 ] && { echo "nothing to record"; exit 0; }
+          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LINE="{\"ts\":\"$TS\",\"version\":\"${{ inputs.version }}\",\"run_id\":\"${{ github.run_id }}\",\"legs\":["
+          first=1
+          for f in "${FILES[@]}"; do
+            REC=$(tr -d '\n' < "$f")
+            if [ $first -eq 1 ]; then LINE="$LINE$REC"; first=0; else LINE="$LINE,$REC"; fi
+          done
+          LINE="$LINE]}"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git fetch origin ci-metrics 2>/dev/null || true
+          if git rev-parse --verify origin/ci-metrics >/dev/null 2>&1; then
+            git checkout -B ci-metrics origin/ci-metrics
+          else
+            git checkout --orphan ci-metrics
+            git rm -rf . >/dev/null 2>&1 || true
+            echo '# CI build-cache metrics (rolling JSONL)' > README.md
+          fi
+          mkdir -p ci
+          echo "$LINE" >> ci/build-metrics.jsonl
+          git add ci/build-metrics.jsonl README.md
+          git commit -m "ci(metrics): v${{ inputs.version }} run ${{ github.run_id }}" || { echo 'no change'; exit 0; }
+          git push origin ci-metrics
+        continue-on-error: true
