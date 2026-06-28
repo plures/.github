@@ -10,7 +10,7 @@ name: Tauri Platform Release (reusable)
 #
 # Target → runner mapping (NO cross-compiling of bundles):
 #   windows-latest → nsis + msi
-#   macos-14 (Apple silicon) → dmg aarch64   |  macos-13 (Intel) → dmg x86_64
+#   macos-14 (Apple silicon) → dmg aarch64   |  macos-15-intel (Intel) → dmg x86_64
 #   ubuntu-22.04 → deb + appimage  (+ Flatpak post-step)
 #   ubuntu-22.04 (nix) → NixOS flake package (built, not an installer format)
 # Ubuntu is pinned to 22.04 for older glibc → portable .deb/.AppImage.
@@ -73,6 +73,7 @@ jobs:
   # ── Desktop bundles via tauri-action (Windows / macOS / Linux) ──
   desktop:
     name: ${{ matrix.label }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
