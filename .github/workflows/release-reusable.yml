@@ -541,6 +541,9 @@ jobs:
           name: v${{ needs.prepare.outputs.new_version }}
           body_path: /tmp/release-notes.md
           generate_release_notes: true
+          # Parity: odd/dev lines are prereleases; even/stable lines are full releases.
+          # (is_prerelease is only ever true for parity-opted repos on an odd minor.)
+          prerelease: ${{ needs.prepare.outputs.is_prerelease == 'true' }}
 
   # ──────────────────────────────────────────────────────────────────
   # 3b. Platform installers (even/stable lines only, opt-in repos)
@@ -604,7 +607,13 @@ jobs:
         # id-token: write permission (set at workflow level). Once npm packages
         # are configured to trust this repo as a "Trusted Publisher", provenance
         # enables keyless publishing without static NPM_TOKEN.
-        run: npm publish --ignore-scripts --access public --provenance
+        # Parity: prereleases (odd/dev lines) publish under the 'next' dist-tag so
+        # `npm install <pkg>` (which resolves 'latest') never picks up a dev build.
+        run: |
+          NPM_TAG=latest
+          if [ "${{ needs.prepare.outputs.is_prerelease }}" = "true" ]; then NPM_TAG=next; fi
+          echo "Publishing to npm under dist-tag: $NPM_TAG"
+          npm publish --ignore-scripts --access public --provenance --tag "$NPM_TAG"
         continue-on-error: true
 
       - name: Publish to GitHub Packages
@@ -614,7 +623,9 @@ jobs:
           # Temporarily set registry to GitHub Packages
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
           echo "@plures:registry=https://npm.pkg.github.com" >> .npmrc
-          npm publish --ignore-scripts --access public
+          NPM_TAG=latest
+          if [ "${{ needs.prepare.outputs.is_prerelease }}" = "true" ]; then NPM_TAG=next; fi
+          npm publish --ignore-scripts --access public --tag "$NPM_TAG"
         continue-on-error: true
 
   publish-jsr:
