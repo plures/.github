@@ -1,0 +1,90 @@
+name: Budget Stop-Loss
+
+# Org-wide GitHub Actions spend guard. Runs daily, reads the enhanced billing
+# usage report, computes CURRENT-MONTH net (post-discount) Actions spend, and:
+#   - posts a step-summary + (optionally) a Telegram alert at 70/85/95% of budget
+#   - at CRITICAL (>=95%) with enforcement enabled, pauses NONESSENTIAL
+#     scheduled workflows org-wide (those whose only trigger is schedule/
+#     workflow_dispatch). Event-driven CI (push/pull_request) is never touched.
+#
+# Re-enabling paused workflows is intentionally MANUAL (next cycle) so a human
+# decides what comes back. Set vars/secrets below to tune.
+#
+# Required for billing read: a token with org admin/billing read scope, provided
+# as secrets.PLURES_GITHUB_TOKEN (falls back to GITHUB_TOKEN, which usually
+# CANNOT read org billing — set the PAT secret for this to work).
+#
+# Tuning (Actions variables / secrets on the .github repo):
+#   vars.ACTIONS_MONTHLY_BUDGET_USD   default 150
+#   vars.ACTIONS_BUDGET_ENFORCE       "true" to allow auto-pause at CRITICAL
+#   secrets.PLURES_GITHUB_TOKEN       org billing-capable token
+#   secrets.TELEGRAM_BOT_TOKEN / secrets.TELEGRAM_CHAT_ID  optional alerting
+
+on:
+  schedule:
+    - cron: "0 15 * * *" # 08:00 PDT daily
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: "Monthly budget (USD) to check against"
+        required: false
+        default: "150"
+      enforce:
+        description: "Auto-pause nonessential scheduled workflows at CRITICAL"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: budget-stop-loss
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write # needed to disable workflows at CRITICAL when enforcing
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Evaluate Actions budget
+        id: budget
+        env:
+          GH_TOKEN: ${{ secrets.PLURES_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          MONTHLY_BUDGET_USD: ${{ github.event.inputs.budget || vars.ACTIONS_MONTHLY_BUDGET_USD || '150' }}
+          ENFORCE: ${{ github.event.inputs.enforce || vars.ACTIONS_BUDGET_ENFORCE || 'false' }}
+        run: |
+          node scripts/budget-stop-loss.mjs \
+            --org "$ORG" \
+            --budget "$MONTHLY_BUDGET_USD" \
+            ${ENFORCE:+$([ "$ENFORCE" = "true" ] && echo --enforce)}
+
+      - name: Telegram alert (WARN and above)
+        if: >-
+          steps.budget.outputs.level != 'OK' &&
+          steps.budget.outputs.level != ''
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LEVEL: ${{ steps.budget.outputs.level }}
+          PCT: ${{ steps.budget.outputs.pct }}
+          NET: ${{ steps.budget.outputs.net }}
+          MIN: ${{ steps.budget.outputs.minutes }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+            echo "Telegram secrets not set — skipping alert (step summary still posted)."
+            exit 0
+          fi
+          ICON="⚠️"; [ "$LEVEL" = "HIGH" ] && ICON="🔶"; [ "$LEVEL" = "CRITICAL" ] && ICON="🛑"
+          MSG="$ICON Actions budget $LEVEL — ${{ github.repository_owner }}: \$$NET (${PCT}% of budget), ${MIN} min this month."
+          curl -fsS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            --data-urlencode text="$MSG" >/dev/null \
+            && echo "Alert sent." || echo "Alert send failed (non-fatal)."
