@@ -316,8 +316,17 @@ jobs:
             echo "::warning::No flake.nix at repo root — skipping NixOS package build. (Add a packages.default for the NixOS target.)"
             exit 0
           fi
+          # Build the primary package (.#default). For Tauri desktop apps the installer
+          # target is the desktop GUI package — build .#desktop too when the flake exposes it,
+          # so a desktop release doesn't silently ship only the CLI.
           nix build .#default --print-build-logs
-          echo "NixOS flake package built: $(readlink -f result || echo result)"
+          echo "NixOS .#default built: $(readlink -f result || echo result)"
+          if nix eval --raw .#desktop.name >/dev/null 2>&1; then
+            nix build .#desktop --print-build-logs --out-link result-desktop
+            echo "NixOS .#desktop built: $(readlink -f result-desktop || echo result-desktop)"
+          else
+            echo "::notice::flake exposes no packages.desktop — built .#default only."
+          fi
 
   # ── Android (DORMANT until "android" added to platformTargets + signing secrets present) ──
   # Historically the #1 timeout source: cold NDK download + Gradle/AGP build across up to 4 ABIs.
