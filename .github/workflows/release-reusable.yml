@@ -74,6 +74,7 @@ jobs:
       is_prerelease: ${{ steps.decide.outputs.is_prerelease }}
       should_build_installers: ${{ steps.decide.outputs.should_build_installers }}
       parity_law: ${{ steps.detect.outputs.parity_law }}
+      platform_targets: ${{ steps.detect.outputs.platform_targets }}
       current_version: ${{ steps.detect.outputs.current_version }}
       has_npm: ${{ steps.detect.outputs.has_npm }}
       has_napi: ${{ steps.detect.outputs.has_napi }}
@@ -159,6 +160,19 @@ jobs:
           fi
           echo "parity_law=$PARITY_LAW" >> $GITHUB_OUTPUT
           echo "Parity law (even/odd release lines): $PARITY_LAW"
+
+          # ── Platform installer targets (from .plures/release.toml) ──
+          PLATFORM_TARGETS='[]'
+          if [ -f .plures/release.toml ]; then
+            # Extract the platformTargets = [ ... ] array (single-line form) and normalize to JSON.
+            RAW=$(grep -E '^[[:space:]]*platformTargets[[:space:]]*=' .plures/release.toml | head -1 | sed 's/^[^=]*=[[:space:]]*//')
+            if [ -n "$RAW" ]; then
+              # Convert TOML array (double-quoted strings) to compact JSON array.
+              PLATFORM_TARGETS=$(echo "$RAW" | tr -d ' ' | sed "s/'/\"/g")
+            fi
+          fi
+          echo "platform_targets=$PLATFORM_TARGETS" >> $GITHUB_OUTPUT
+          echo "Platform targets: $PLATFORM_TARGETS"
 
       - name: Analyze commits and decide version bump
         id: decide
@@ -527,6 +541,18 @@ jobs:
           name: v${{ needs.prepare.outputs.new_version }}
           body_path: /tmp/release-notes.md
           generate_release_notes: true
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3b. Platform installers (even/stable lines only, opt-in repos)
+  # ──────────────────────────────────────────────────────────────────
+  build-installers:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.should_build_installers == 'true' && inputs.dry_run != true
+    uses: plures/.github/.github/workflows/tauri-release-reusable.yml@main
+    with:
+      version: ${{ needs.prepare.outputs.new_version }}
+      platform_targets: ${{ needs.prepare.outputs.platform_targets }}
+    secrets: inherit
 
   # ──────────────────────────────────────────────────────────────────
   # 4. Publish to registries

@@ -1,0 +1,274 @@
+name: Tauri Platform Release (reusable)
+
+# Builds platform installers for a Tauri 2 app and attaches them to an existing
+# GitHub Release. Invoked by release-reusable.yml ONLY when:
+#   is_even(minor) AND publishPlatformInstallers AND dry_run != true
+# (the even/odd parity gate lives in release-reusable.yml; this workflow trusts that gate).
+#
+# Design contract: development-guide/design/TAURI-BEST-PRACTICES.md
+#                  pares-radix/.praxis/decisions/ADR-0029-even-odd-release-gating.md
+#
+# Target → runner mapping (NO cross-compiling of bundles):
+#   windows-latest → nsis + msi
+#   macos-14 (Apple silicon) → dmg aarch64   |  macos-13 (Intel) → dmg x86_64
+#   ubuntu-22.04 → deb + appimage  (+ Flatpak post-step)
+#   ubuntu-22.04 (nix) → NixOS flake package (built, not an installer format)
+# Ubuntu is pinned to 22.04 for older glibc → portable .deb/.AppImage.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version (no leading v), e.g. 1.54.0"
+        required: true
+        type: string
+      platform_targets:
+        description: 'JSON array of targets, e.g. ["windows","macos","linux-flatpak","nixos"]'
+        required: false
+        type: string
+        default: '["windows","macos","linux-flatpak","nixos"]'
+      tauri_dir:
+        description: "Path to the Tauri app crate (contains tauri.conf.json)"
+        required: false
+        type: string
+        default: "src-tauri"
+      frontend_install:
+        description: "Command to install frontend deps (run before build)"
+        required: false
+        type: string
+        default: "pnpm install --frozen-lockfile"
+      frontend_build:
+        description: "Command to build the frontend (Tauri beforeBuildCommand may also do this)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Desktop bundles via tauri-action (Windows / macOS / Linux) ──
+  desktop:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows (nsis+msi)
+            target: windows
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            args: ""
+          - label: macos-arm (dmg aarch64)
+            target: macos
+            runner: macos-14
+            rust_target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - label: macos-intel (dmg x86_64)
+            target: macos
+            runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - label: linux (deb+appimage)
+            target: linux
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            args: ""
+    runs-on: ${{ matrix.runner }}
+    # Only run this matrix leg if its target family was requested in platform_targets.
+    # (linux-flatpak implies the linux desktop build; flatpak is packaged in a later job.)
+    steps:
+      - name: Check target requested
+        id: gate
+        shell: bash
+        run: |
+          TARGETS='${{ inputs.platform_targets }}'
+          WANT="${{ matrix.target }}"
+          # linux desktop is needed if either "linux" or "linux-flatpak" is requested
+          if [ "$WANT" = "linux" ]; then
+            if echo "$TARGETS" | grep -q '"linux"' || echo "$TARGETS" | grep -q '"linux-flatpak"'; then
+              echo "run=true" >> $GITHUB_OUTPUT
+            else
+              echo "run=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            if echo "$TARGETS" | grep -q "\"$WANT\""; then
+              echo "run=true" >> $GITHUB_OUTPUT
+            else
+              echo "run=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install Linux system deps
+        if: steps.gate.outputs.run == 'true' && matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      - name: Setup Rust
+        if: steps.gate.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        if: steps.gate.outputs.run == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Per-OS + per-target-triple cache key so legs never clobber each other.
+          key: ${{ matrix.rust_target }}
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: pnpm
+
+      - name: Install frontend deps
+        if: steps.gate.outputs.run == 'true'
+        run: ${{ inputs.frontend_install }}
+
+      - name: Build frontend
+        if: steps.gate.outputs.run == 'true' && inputs.frontend_build != ''
+        run: ${{ inputs.frontend_build }}
+
+      - name: Build + upload Tauri bundles
+        if: steps.gate.outputs.run == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Updater artifact signing (optional — only signs if the key secret exists).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code-signing + notarization (optional — unsigned if absent).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: "."
+          tauriScript: pnpm tauri
+          # Attach built installers to the EXISTING release (matched by tag) that
+          # release-reusable.yml already created. tauri-action finds it by tagName.
+          tagName: v${{ inputs.version }}
+          args: ${{ matrix.args }}
+
+  # ── Flatpak (post-step over the Linux deb) ──
+  flatpak:
+    name: linux-flatpak
+    needs: desktop
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check flatpak requested
+        id: gate
+        shell: bash
+        run: |
+          if echo '${{ inputs.platform_targets }}' | grep -q '"linux-flatpak"'; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install flatpak + flatpak-builder
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak bundle
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          MANIFEST="${{ inputs.tauri_dir }}/flatpak/ai.plures.radix.yml"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::warning::No Flatpak manifest at $MANIFEST — skipping Flatpak build. (Add one to emit a .flatpak.)"
+            exit 0
+          fi
+          flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build-dir "$MANIFEST"
+          flatpak build-bundle repo ai.plures.radix.flatpak ai.plures.radix
+          echo "Built ai.plures.radix.flatpak"
+
+      - name: Upload Flatpak to release
+        if: steps.gate.outputs.run == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          files: ai.plures.radix.flatpak
+        continue-on-error: true
+
+  # ── NixOS: build the flake package + push to pares-cache (NOT an installer format) ──
+  nixos:
+    name: nixos (flake package)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check nixos requested
+        id: gate
+        shell: bash
+        run: |
+          if echo '${{ inputs.platform_targets }}' | grep -q '"nixos"'; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install Nix
+        if: steps.gate.outputs.run == 'true'
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build flake package
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          if [ ! -f flake.nix ]; then
+            echo "::warning::No flake.nix at repo root — skipping NixOS package build. (Add a packages.default for the NixOS target.)"
+            exit 0
+          fi
+          nix build .#default --print-build-logs
+          echo "NixOS flake package built: $(readlink -f result || echo result)"
