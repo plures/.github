@@ -438,6 +438,21 @@ jobs:
             sed -i "0,/^version = /s/^version = .*/version = \"${{ needs.prepare.outputs.new_version }}\"/" Cargo.toml
           fi
 
+      # Cargo.lock must track Cargo.toml or `cargo --locked|--frozen` (CI, packaging,
+      # Nix builds) breaks (C-NIX-002). The sed bump above edits the manifest only, so
+      # refresh the lock's workspace-member entries. `cargo update --workspace` re-resolves
+      # ONLY workspace crates (external deps untouched) — verified no dependency drift.
+      - name: Sync Cargo.lock to bumped version
+        if: needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
+        uses: dtolnay/rust-toolchain@stable
+      - name: Refresh Cargo.lock workspace versions
+        if: needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
+        run: |
+          cargo update --workspace
+          # Fail loudly if the lock is still out of sync (guards against silent drift).
+          cargo metadata --locked --format-version 1 >/dev/null
+          echo "✓ Cargo.lock synced to ${{ needs.prepare.outputs.new_version }}"
+
       - name: Sync version across all version-bearing files
         run: |
           VERSION="${{ needs.prepare.outputs.new_version }}"
