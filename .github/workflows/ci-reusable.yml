@@ -124,6 +124,7 @@ jobs:
       has_rust: ${{ steps.detect.outputs.has_rust }}
       has_deno: ${{ steps.detect.outputs.has_deno }}
       pkg_manager: ${{ steps.detect.outputs.pkg_manager }}
+      pnpm_version: ${{ steps.detect.outputs.pnpm_version }}
       has_lint: ${{ steps.detect.outputs.has_lint }}
       has_test: ${{ steps.detect.outputs.has_test }}
       has_build: ${{ steps.detect.outputs.has_build }}
@@ -177,6 +178,21 @@ jobs:
           echo "Detected package manager: $PM"
           echo "pkg_manager=$PM" >> $GITHUB_OUTPUT
 
+          # Resolve a pnpm version for pnpm/action-setup. The action REQUIRES a
+          # version and errors ("No pnpm version is specified") when neither its
+          # `version:` input nor a package.json "packageManager" pin is present.
+          # Repos detected as pnpm via workspace:/pnpm-workspace but WITHOUT a
+          # packageManager pin (e.g. pares-modulus) hit exactly that. Prefer an
+          # explicit pnpm pin from packageManager; otherwise fall back to a
+          # known-good default so the action always has a version.
+          PNPM_VERSION=""
+          if [ "$PM" = "pnpm" ] && [ -f package.json ]; then
+            PNPM_VERSION=$(node -e "try{const v=require('./package.json').packageManager;if(v&&String(v).startsWith('pnpm@'))process.stdout.write(String(v).split('@')[1])}catch(e){}" 2>/dev/null || true)
+          fi
+          if [ "$PM" = "pnpm" ] && [ -z "$PNPM_VERSION" ]; then PNPM_VERSION="10"; fi
+          echo "Detected pnpm version: ${PNPM_VERSION:-<none>}"
+          echo "pnpm_version=$PNPM_VERSION" >> $GITHUB_OUTPUT
+
           # Detect available scripts
           if [ -f package.json ]; then
             echo "has_lint=$(node -e "console.log(!!require('./package.json').scripts?.lint)" 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
@@ -207,6 +223,12 @@ jobs:
       - name: Setup pnpm
         if: needs.detect.outputs.pkg_manager == 'pnpm'
         uses: pnpm/action-setup@v4
+        with:
+          # Explicit version so the action never errors with "No pnpm version is
+          # specified" for pnpm repos that lack a packageManager pin. When the
+          # repo DOES pin via packageManager, action-setup still honors that;
+          # this resolved value mirrors it (or a known-good default otherwise).
+          version: ${{ needs.detect.outputs.pnpm_version }}
 
       - name: Install dependencies
         run: |
