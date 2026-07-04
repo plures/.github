@@ -138,16 +138,44 @@ jobs:
           echo "has_rust=$( [ -f Cargo.toml ] && echo true || echo false )" >> $GITHUB_OUTPUT
           echo "has_deno=$( [ -f deno.json ] || [ -f deno.jsonc ] && echo true || echo false )" >> $GITHUB_OUTPUT
 
-          # Detect package manager
-          if [ -f pnpm-lock.yaml ]; then
-            echo "pkg_manager=pnpm" >> $GITHUB_OUTPUT
-          elif [ -f yarn.lock ]; then
-            echo "pkg_manager=yarn" >> $GITHUB_OUTPUT
-          elif [ -f bun.lockb ]; then
-            echo "pkg_manager=bun" >> $GITHUB_OUTPUT
-          else
-            echo "pkg_manager=npm" >> $GITHUB_OUTPUT
+          # Detect package manager (robust: lockfiles + packageManager field +
+          # pnpm-workspace + workspace: protocol). A repo can ship a stale
+          # package-lock.json while declaring "workspace:*" deps (which only pnpm/
+          # yarn understand) — npm ci then fails with EUNSUPPORTEDPROTOCOL. So the
+          # workspace: protocol and pnpm-workspace/packageManager signals must win
+          # over a bare package-lock.json, and pnpm must be preferred for them.
+          PM=""
+          # 1. Explicit packageManager field wins (Corepack-style pinning).
+          if [ -f package.json ]; then
+            PM_FIELD=$(node -e "try{const v=require('./package.json').packageManager;if(v)process.stdout.write(String(v).split('@')[0])}catch(e){}" 2>/dev/null || true)
+            case "$PM_FIELD" in
+              pnpm|yarn|bun|npm) PM="$PM_FIELD" ;;
+            esac
           fi
+          # 2. Lockfiles.
+          if [ -z "$PM" ]; then
+            if [ -f pnpm-lock.yaml ]; then PM=pnpm
+            elif [ -f yarn.lock ]; then PM=yarn
+            elif [ -f bun.lockb ] || [ -f bun.lock ]; then PM=bun
+            fi
+          fi
+          # 3. pnpm workspace marker.
+          if [ -z "$PM" ] && [ -f pnpm-workspace.yaml ]; then PM=pnpm; fi
+          # 4. workspace: protocol anywhere (root or any child package.json).
+          #    Only pnpm/yarn resolve it; default such repos to pnpm.
+          if [ -z "$PM" ]; then
+            if grep -rIlqE '"[^"]+"[[:space:]]*:[[:space:]]*"workspace:' \
+                 --include='package.json' \
+                 --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null; then
+              PM=pnpm
+            fi
+          fi
+          # 5. Genuine npm (package-lock.json) or final default.
+          if [ -z "$PM" ]; then
+            if [ -f package-lock.json ]; then PM=npm; else PM=npm; fi
+          fi
+          echo "Detected package manager: $PM"
+          echo "pkg_manager=$PM" >> $GITHUB_OUTPUT
 
           # Detect available scripts
           if [ -f package.json ]; then
