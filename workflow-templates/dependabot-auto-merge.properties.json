@@ -1,0 +1,1 @@
+{"name":"Dependabot Auto-Merge (security-aware)","description":"Auto-merge low-risk + security Dependabot PRs once CI is green. Security PRs override semver; 0.x breaking bumps flagged for review.","iconName":"dependabot","categories":["automation","dependency-management"],"filePatterns":[]}
