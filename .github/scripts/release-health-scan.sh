@@ -36,6 +36,20 @@ failed_list=""
 ok_count=0
 skip_count=0
 
+# SANCTIONED non-reusable release paths. These repos intentionally do NOT use
+# release-reusable.yml because their release model is genuinely different, and
+# that is a reviewed decision, not drift. We still scan them for FAILED runs
+# (a real failure must always surface), but we do NOT treat a lagging release
+# on these as a consolidation problem. Keep this list SMALL and justified:
+#   - netops-toolkit : Python (pyproject.toml) + tar.gz air-gapped archive,
+#                      branch-push triggered. Healthy (releases on its own path).
+#   - praxis-lang    : Rust workspace with a schema/grammar drift-gate; crate
+#                      versions are 0.0.0 and publish is deferred to epic M5 by
+#                      design (documented placeholder, not a stub). Pre-release.
+# NOTE: inner-space is deliberately NOT here - its Tauri MSI release has failed
+# and must keep surfacing until fixed.
+SANCTIONED_NONREUSABLE="netops-toolkit praxis-lang"
+
 # Enumerate non-archived repos that actually have a release workflow.
 repos=$(gh repo list plures --limit 200 --no-archived --json name --jq '.[].name')
 
@@ -79,7 +93,15 @@ for r in $repos; do
   age_days=$(( (NOW_EPOCH - rel_epoch) / 86400 ))
 
   if [ "$(is_stale "$releasable" "$NOW_EPOCH" "$rel_epoch" "$STALE_SECS")" = "1" ]; then
-    stale_list="${stale_list}  - ${r}: ${releasable} releasable commit(s) since ${last_tag:-<no tag>}, last release ${age_days}d ago\n"
+    # Sanctioned non-reusable repos are exempt from the STALE flag (their
+    # release cadence is intentional/pre-release) but NOT from the FAILED flag
+    # above - a broken run always surfaces.
+    case " $SANCTIONED_NONREUSABLE " in
+      *" $r "*) ok_count=$((ok_count+1)) ;;
+      *)
+        stale_list="${stale_list}  - ${r}: ${releasable} releasable commit(s) since ${last_tag:-<no tag>}, last release ${age_days}d ago\n"
+        ;;
+    esac
   else
     ok_count=$((ok_count+1))
   fi
