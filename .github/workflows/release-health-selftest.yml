@@ -1,0 +1,39 @@
+name: Release Health Self-Test
+
+# Proves the release-health tripwire still detects stale/failed/releasable
+# inputs. The monitor exists because the org's release pipeline broke SILENTLY
+# for ~2 months; a tripwire that can itself go blind is worthless. This runs
+# the pure-logic self-test (no network, no gh) on every change to the scan,
+# its lib, or the test - so a regression that blinds the monitor fails loudly
+# in CI, not in production.
+
+on:
+  push:
+    paths:
+      - '.github/scripts/release-health-*.sh'
+      - '.github/workflows/release-health-selftest.yml'
+  pull_request:
+    paths:
+      - '.github/scripts/release-health-*.sh'
+      - '.github/workflows/release-health-selftest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check scan + lib + test
+        run: |
+          bash -n .github/scripts/release-health-lib.sh
+          bash -n .github/scripts/release-health-scan.sh
+          bash -n .github/scripts/release-health-selftest.sh
+
+      - name: Run release-health self-test
+        run: |
+          chmod +x .github/scripts/release-health-selftest.sh
+          .github/scripts/release-health-selftest.sh

@@ -17,13 +17,19 @@
 # deliberately do NOT use `set -e` here — each step has its own `|| default`.
 set -uo pipefail
 
+# Pure decision logic (count_releasable / is_stale / is_failed_run + the
+# RELEASABLE_RE single-source-of-truth) lives in the sibling lib so it can be
+# unit-tested without live API calls. See release-health-selftest.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./release-health-lib.sh
+. "$SCRIPT_DIR/release-health-lib.sh"
+
 STALE_DAYS="${STALE_DAYS:-14}"
 NOW_EPOCH=$(date -u +%s)
 STALE_SECS=$(( STALE_DAYS * 86400 ))
 
-# Conventional-commit types that SHOULD produce a release (mirror of the
-# reusable's decide step: feat|fix|perf|refactor + release: + breaking !).
-RELEASABLE_RE='^(feat|fix|perf|refactor|release)(\(.+\))?!?:|!:'
+# Conventional-commit types that SHOULD produce a release are defined once in
+# the lib as RELEASABLE_RE (sourced above).
 
 stale_list=""
 failed_list=""
@@ -43,7 +49,7 @@ for r in $repos; do
 
   # Most recent Release run conclusion.
   run_concl=$(gh run list --repo "plures/$r" --workflow Release -L 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null || echo "")
-  if [ "$run_concl" = "failure" ]; then
+  if [ "$(is_failed_run "$run_concl")" = "1" ]; then
     failed_list="${failed_list}  - ${r}: last Release run FAILED\n"
   fi
 
@@ -61,8 +67,7 @@ for r in $repos; do
     compare=$(gh api "repos/plures/$r/commits?sha=${default_branch}&per_page=50" --jq '[.[].commit.message] | .[]' 2>/dev/null || echo "")
   fi
 
-  releasable=$(printf '%s\n' "$compare" | grep -cE "$RELEASABLE_RE" 2>/dev/null | head -1 | tr -d '[:space:]')
-  releasable=${releasable:-0}
+  releasable=$(count_releasable "$compare")
 
   # Date of the last release (fallback: last tag's commit date).
   last_rel_date=$(gh release view --repo "plures/$r" --json publishedAt --jq '.publishedAt' 2>/dev/null || echo "")
@@ -73,7 +78,7 @@ for r in $repos; do
   fi
   age_days=$(( (NOW_EPOCH - rel_epoch) / 86400 ))
 
-  if [ "$releasable" -gt 0 ] && [ $(( NOW_EPOCH - rel_epoch )) -gt "$STALE_SECS" ]; then
+  if [ "$(is_stale "$releasable" "$NOW_EPOCH" "$rel_epoch" "$STALE_SECS")" = "1" ]; then
     stale_list="${stale_list}  - ${r}: ${releasable} releasable commit(s) since ${last_tag:-<no tag>}, last release ${age_days}d ago\n"
   else
     ok_count=$((ok_count+1))
