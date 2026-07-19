@@ -137,6 +137,23 @@ jobs:
             echo "⚠️ Invalid version '$VERSION' — falling back to 0.0.0"
             VERSION="0.0.0"
           fi
+          # ── Highest-tag reconciliation (doctrine: even-odd-release-versioning.md rule #55) ──
+          # The manifest version (Cargo.toml/package.json) frequently drifts BELOW the actual
+          # published release line, because releases bump the git tag + registry but do not
+          # always commit the manifest bump back to main. If we trust the manifest alone, the
+          # computed next version can REGRESS below the highest published tag, and npm/cargo
+          # publish rejects a lower version → the release fails or silently no-ops. This is the
+          # org-wide root cause of "no releases since May". Reconcile: current = max(manifest,
+          # highest existing vX.Y.Z tag). Never regress the version.
+          git fetch --tags --quiet 2>/dev/null || true
+          HIGHEST_TAG=$(git tag -l 'v*' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -n "$HIGHEST_TAG" ]; then
+            GREATER=$(printf '%s\n%s\n' "$VERSION" "$HIGHEST_TAG" | sort -V | tail -1)
+            if [ "$GREATER" != "$VERSION" ]; then
+              echo "↻ Manifest version $VERSION is below highest tag $HIGHEST_TAG — reconciling up to $HIGHEST_TAG"
+              VERSION="$HIGHEST_TAG"
+            fi
+          fi
           echo "current_version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
 
