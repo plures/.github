@@ -328,14 +328,19 @@ jobs:
       - name: cargo clippy
         if: inputs.skip_lint != true
         run: |
-          # If sccache is broken (transient cache failure), disable it and retry
+          # If sccache is broken (transient cache-backend outage), disable it and retry uncached.
+          # A dead GHAC/sccache backend makes clippy-driver -vV fail before any compilation, so the
+          # retry must fully neutralize sccache: unset the wrapper AND disable the GHA cache AND
+          # stop the poisoned server, so the uncached retry can actually start clippy-driver.
           set +e
           cargo clippy ${{ inputs.cargo_clippy_flags }}
           CLIPPY_EXIT=$?
           set -e
           if [ $CLIPPY_EXIT -ne 0 ]; then
-            echo "⚠️ Clippy failed (exit $CLIPPY_EXIT) — retrying without sccache"
+            echo "::warning::Clippy failed (exit $CLIPPY_EXIT) - retrying uncached (sccache backend likely down)"
             unset RUSTC_WRAPPER
+            unset SCCACHE_GHA_ENABLED
+            sccache --stop-server 2>/dev/null || true
             cargo clippy ${{ inputs.cargo_clippy_flags }}
           fi
 
@@ -355,8 +360,10 @@ jobs:
           TEST_EXIT=$?
           set -e
           if [ $TEST_EXIT -ne 0 ]; then
-            echo "⚠️ Test failed (exit $TEST_EXIT) — retrying without sccache"
+            echo "::warning::Test failed (exit $TEST_EXIT) - retrying uncached (sccache backend likely down)"
             unset RUSTC_WRAPPER
+            unset SCCACHE_GHA_ENABLED
+            sccache --stop-server 2>/dev/null || true
             cargo test ${{ inputs.cargo_test_flags }}
           fi
 
