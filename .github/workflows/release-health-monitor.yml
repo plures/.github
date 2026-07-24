@@ -62,6 +62,24 @@ jobs:
             gh issue create --repo ${{ github.repository }} --title "$TITLE" --body "$BODY" --label release-health
           fi
 
+      - name: Alert webhook on tripwire
+        if: ${{ steps.scan.outputs.stale_count != '0' || steps.scan.outputs.failed_count != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK_URL: ${{ secrets.RELEASE_HEALTH_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "RELEASE_HEALTH_WEBHOOK_URL secret not set; skipping notification (see docs/adr/ADR-0001-release-health-alerting.md)."
+            exit 0
+          fi
+          issue_number=$(gh issue list --repo ${{ github.repository }} --state open --label release-health --json number --jq '.[0].number' 2>/dev/null || echo "")
+          issue_url="https://github.com/${{ github.repository }}/issues/${issue_number}"
+          failed="${{ steps.scan.outputs.failed_count }}"
+          stale="${{ steps.scan.outputs.stale_count }}"
+          text=":rotating_light: Release health tripwire: *${failed}* FAILED, *${stale}* STALE release-bearing repos. Details: ${issue_url}"
+          payload=$(printf '{"text":"%s"}' "$text")
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || echo "Webhook POST failed (non-fatal)."
+
       - name: Close tracking issue when healthy
         if: ${{ steps.scan.outputs.stale_count == '0' && steps.scan.outputs.failed_count == '0' }}
         env:
