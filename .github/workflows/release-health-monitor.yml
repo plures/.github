@@ -73,12 +73,20 @@ jobs:
             exit 0
           fi
           issue_number=$(gh issue list --repo ${{ github.repository }} --state open --label release-health --json number --jq '.[0].number' 2>/dev/null || echo "")
-          issue_url="https://github.com/${{ github.repository }}/issues/${issue_number}"
+          if [ -z "$issue_number" ] || [ "$issue_number" = "null" ]; then
+            issue_url="https://github.com/${{ github.repository }}/issues?q=is%3Aissue+label%3Arelease-health"
+          else
+            issue_url="https://github.com/${{ github.repository }}/issues/${issue_number}"
+          fi
           failed="${{ steps.scan.outputs.failed_count }}"
           stale="${{ steps.scan.outputs.stale_count }}"
-          text=":rotating_light: Release health tripwire: *${failed}* FAILED, *${stale}* STALE release-bearing repos. Details: ${issue_url}"
-          payload=$(printf '{"text":"%s"}' "$text")
-          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || echo "Webhook POST failed (non-fatal)."
+          # Pull the actual repo names out of report.md so the alert is
+          # actionable without opening the issue (not just a count + link).
+          failed_repos=$(sed -n '/^### .* Recent Release run FAILED/,/^$/{/^  - /p}' report.md | sed -E 's/^  - ([^:]+):.*/\1/' | paste -sd ', ' -)
+          stale_repos=$(sed -n '/^### .* STALE/,/^$/{/^  - /p}' report.md | sed -E 's/^  - ([^:]+):.*/\1/' | paste -sd ', ' -)
+          text=":rotating_light: Release health tripwire: *${failed}* FAILED (${failed_repos:-none}), *${stale}* STALE (${stale_repos:-none}) release-bearing repos. Details: ${issue_url}"
+          payload=$(printf '{"text":"%s","failed_count":%s,"stale_count":%s,"failed_repos":"%s","stale_repos":"%s","issue_url":"%s"}' "$text" "${failed:-0}" "${stale:-0}" "$failed_repos" "$stale_repos" "$issue_url")
+          curl -sS --connect-timeout 10 --max-time 30 -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || echo "Webhook POST failed (non-fatal)."
 
       - name: Close tracking issue when healthy
         if: ${{ steps.scan.outputs.stale_count == '0' && steps.scan.outputs.failed_count == '0' }}
