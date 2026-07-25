@@ -26,9 +26,21 @@ name: Dependabot Auto-Merge
 # Ref: development-guide/practices/automation-first.md ("auto-merge patch updates"),
 #      zero-manual-dependency.md, merge-sweeps.md (green -> squash merge).
 
+# USAGE (org repos): replace your local copy of this file with a thin caller:
+#
+#   name: Dependabot Auto-Merge
+#   on:
+#     pull_request_target:
+#       types: [opened, synchronize, reopened, ready_for_review]
+#   jobs:
+#     auto-merge:
+#       uses: plures/.github/.github/workflows/dependabot-auto-merge.yml@main
+#       secrets: inherit
+
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call: {}
 
 permissions:
   contents: write
