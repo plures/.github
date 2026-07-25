@@ -1,0 +1,165 @@
+name: Cross-Repo Regression Sweep (reusable)
+
+# Reusable workflow: called by producer repos (pluresdb, praxis, pares-radix)
+# after a merge to main lands on a crate/package that other repos consume.
+# It dispatches the CONSUMER repos' existing `ci.yml` (workflow_dispatch is
+# already enabled on every plures ci.yml) and blocks the caller until those
+# runs finish, failing loudly if any consumer regresses.
+#
+# USAGE in a producer repo's own workflow (e.g. pluresdb/.github/workflows/release.yml):
+#
+#   jobs:
+#     regression-sweep:
+#       if: github.ref == 'refs/heads/main'
+#       uses: plures/.github/.github/workflows/cross-repo-regression.yml@main
+#       with:
+#         producer: pluresdb
+#       secrets:
+#         dispatch_token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
+#
+# The `producer` input selects the consumer edge set from the table below,
+# which mirrors docs/CROSS-REPO-DEPENDENCY-GRAPH.md in this repo. Keep them
+# in sync: this file is the machine copy, that doc is the human-readable one.
+
+on:
+  workflow_call:
+    inputs:
+      producer:
+        description: "Producer repo name that just merged (pluresdb | praxis | pares-radix)"
+        required: true
+        type: string
+      ref:
+        description: "Producer ref/sha that triggered the sweep (for logging/annotation only)"
+        required: false
+        type: string
+        default: ${{ github.sha }}
+      poll_interval_seconds:
+        description: "Seconds between consumer run-status polls"
+        required: false
+        type: number
+        default: 30
+      poll_timeout_minutes:
+        description: "Max minutes to wait for all dispatched consumer CI runs"
+        required: false
+        type: number
+        default: 45
+    secrets:
+      dispatch_token:
+        description: "PAT/GH App token with `actions:write` + `contents:read` on every consumer repo"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-consumers:
+    runs-on: ubuntu-latest
+    outputs:
+      consumers: ${{ steps.resolve.outputs.consumers }}
+    steps:
+      - id: resolve
+        name: Resolve consumer edge set for this producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.producer }}" in
+            pluresdb)
+              # pluresdb is consumed (git+rev pinned) by pares-radix, pares-agens,
+              # and independently by pares-arca. See CROSS-REPO-DEPENDENCY-GRAPH.md
+              # finding 1/2: radix+agens share a rev by convention (not enforced);
+              # arca pins its own rev. All three must be swept.
+              echo 'consumers=["pares-radix","pares-agens","pares-arca"]' >> "$GITHUB_OUTPUT"
+              ;;
+            praxis)
+              # praxis has no direct crate consumer today (finding 5) - it is
+              # consumed indirectly through pluresdb-px. Route the sweep through
+              # the same consumer set as pluresdb until a direct edge exists.
+              echo 'consumers=["pares-radix","pares-agens"]' >> "$GITHUB_OUTPUT"
+              ;;
+            pares-radix)
+              # pares-agens re-vendors pares-radix crates by git TAG, not path
+              # (finding 3) - the sweep target is pares-agens; pares-modulus and
+              # pares-arca have no Cargo edge to pares-radix today so are skipped.
+              echo 'consumers=["pares-agens"]' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::unknown producer '${{ inputs.producer }}' - add it to cross-repo-regression.yml resolve-consumers AND docs/CROSS-REPO-DEPENDENCY-GRAPH.md"
+              exit 1
+              ;;
+          esac
+
+  dispatch-and-wait:
+    needs: resolve-consumers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        consumer: ${{ fromJson(needs.resolve-consumers.outputs.consumers) }}
+    steps:
+      - name: Dispatch consumer ci.yml
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.dispatch_token }}
+        run: |
+          set -euo pipefail
+          echo "Dispatching plures/${{ matrix.consumer }} ci.yml for producer=${{ inputs.producer }}@${{ inputs.ref }}"
+          before=$(gh run list -R "plures/${{ matrix.consumer }}" --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          # NOTE: consumer ci.yml currently exposes a bare `workflow_dispatch:`
+          # (no custom inputs) - see docs/CROSS-REPO-DEPENDENCY-GRAPH.md. Do not
+          # pass -f flags until each consumer ci.yml adds a `reason` input, or
+          # this dispatch call will fail with "unexpected input".
+          gh workflow run ci.yml -R "plures/${{ matrix.consumer }}"
+          echo "before_id=${before}" >> "$GITHUB_OUTPUT"
+
+      - name: Poll for the new run and wait for its conclusion
+        env:
+          GH_TOKEN: ${{ secrets.dispatch_token }}
+        run: |
+          set -euo pipefail
+          before="${{ steps.dispatch.outputs.before_id }}"
+          deadline=$((SECONDS + ${{ inputs.poll_timeout_minutes }} * 60))
+          run_id=""
+          # Find the newly-created run (id different from `before`).
+          while [ -z "$run_id" ]; do
+            if [ $SECONDS -ge $deadline ]; then
+              echo "::error::timed out waiting for dispatched run to appear on plures/${{ matrix.consumer }}"
+              exit 1
+            fi
+            candidate=$(gh run list -R "plures/${{ matrix.consumer }}" --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$candidate" ] && [ "$candidate" != "$before" ]; then
+              run_id="$candidate"
+            fi
+            sleep 5
+          done
+          echo "Watching plures/${{ matrix.consumer }} run $run_id"
+          while true; do
+            if [ $SECONDS -ge $deadline ]; then
+              echo "::error::timed out waiting for plures/${{ matrix.consumer }} run $run_id to finish"
+              exit 1
+            fi
+            status=$(gh run view "$run_id" -R "plures/${{ matrix.consumer }}" --json status,conclusion --jq '.status')
+            if [ "$status" = "completed" ]; then
+              conclusion=$(gh run view "$run_id" -R "plures/${{ matrix.consumer }}" --json conclusion --jq '.conclusion')
+              echo "plures/${{ matrix.consumer }} run $run_id concluded: $conclusion"
+              if [ "$conclusion" != "success" ]; then
+                echo "::error::plures/${{ matrix.consumer }} ci.yml REGRESSED against ${{ inputs.producer }}@${{ inputs.ref }} (conclusion=$conclusion, run=$run_id)"
+                exit 1
+              fi
+              break
+            fi
+            sleep "${{ inputs.poll_interval_seconds }}"
+          done
+
+  summary:
+    needs: dispatch-and-wait
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report sweep result
+        run: |
+          if [ "${{ needs.dispatch-and-wait.result }}" = "success" ]; then
+            echo "✅ Cross-repo regression sweep passed for producer=${{ inputs.producer }}@${{ inputs.ref }}"
+          else
+            echo "::error::❌ Cross-repo regression sweep FAILED for producer=${{ inputs.producer }}@${{ inputs.ref }} - do not release until resolved"
+            exit 1
+          fi
