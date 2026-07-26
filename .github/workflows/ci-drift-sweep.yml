@@ -35,11 +35,21 @@ jobs:
     steps:
       - name: Checkout (for the scan script)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: sha_reachable_from_main() needs merge-base against main
 
       - name: Run CI drift scan
         id: scan
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PLURES_GITHUB_TOKEN is an org-scoped PAT (same one budget-stop-loss.yml
+          # uses for org-wide reads) with permission to read OTHER repos'
+          # contents. The default GITHUB_TOKEN is scoped to THIS repo only, so
+          # without the org PAT every cross-repo `gh api repos/<org>/<repo>/...`
+          # call 404s and the repo is silently counted as "skipped" — a false
+          # clean/under-scanned result. Falls back to GITHUB_TOKEN so the script
+          # still runs (scanning only what it can see) if the org secret is not
+          # yet provisioned; see PR description for the provisioning prerequisite.
+          GH_TOKEN: ${{ secrets.PLURES_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           ORG: ${{ github.repository_owner }}
         run: |
           chmod +x .github/scripts/ci-drift-scan.sh

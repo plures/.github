@@ -15,7 +15,11 @@
 # (same lib/scan/selftest split, same GITHUB_OUTPUT contract) so the calling
 # workflow can alert identically.
 #
-# Env: GH_TOKEN must be set. Optional: ORG (default plures).
+# Env: GH_TOKEN must be set (needs cross-repo read access to org repos'
+# contents API — the default GITHUB_TOKEN is repo-scoped to .github only and
+# will silently under-scan/skip every other repo; use secrets.PLURES_GITHUB_TOKEN,
+# same org-scoped token used by budget-stop-loss.yml, with a GITHUB_TOKEN
+# fallback for local/manual runs). Optional: ORG (default plures).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +27,49 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/ci-drift-lib.sh"
 
 ORG="${ORG:-plures}"
+
+# sha_reachable_from_main SHA
+# Returns "1" if SHA is a full 40-char commit that is an ancestor of (i.e.
+# reachable from) main in the LOCAL .github repo checkout, else "0". This is
+# the live half of the is_stale_ref contract documented in ci-drift-lib.sh:
+# a repo pinned to an exact SHA that main has already passed through is not
+# drift (it just hasn't picked up the latest tag yet); a SHA that main never
+# contained (or an unrelated branch/tag name) IS drift.
+# Requires a git checkout with enough history to contain both refs; falls
+# back to "0" (treat as stale) if the SHA/ref can't be resolved locally.
+sha_reachable_from_main() {
+  local sha="$1"
+  if [ "$(is_full_sha "$sha")" != "1" ]; then
+    echo "0"; return
+  fi
+  if git cat-file -e "${sha}^{commit}" 2>/dev/null \
+     && git merge-base --is-ancestor "$sha" main 2>/dev/null; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
+# classify_with_reachability CONTENT
+# Wraps classify() but downgrades a STALE_REF verdict to OK when the pinned
+# ref is a full commit SHA that is reachable from main (per is_stale_ref's
+# documented contract — the pure lib function can't do this itself since it
+# has no git access).
+classify_with_reachability() {
+  local content="$1"
+  local result
+  result=$(classify "$content")
+  case "$result" in
+    STALE_REF:*)
+      local ref="${result#STALE_REF:}"
+      if [ "$(sha_reachable_from_main "$ref")" = "1" ]; then
+        echo "OK"
+        return
+      fi
+      ;;
+  esac
+  echo "$result"
+}
 
 local_list=""
 stale_list=""
@@ -52,7 +99,7 @@ for r in $repos; do
     skip_count=$((skip_count+1)); continue
   fi
 
-  result=$(classify "$content")
+  result=$(classify_with_reachability "$content")
   case "$result" in
     OK)
       ok_count=$((ok_count+1))

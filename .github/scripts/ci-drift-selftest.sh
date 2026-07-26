@@ -58,6 +58,25 @@ check "is_delegating false" "0" "$(is_delegating "$c2")"
 check "extract_ref main" "main" "$(extract_ref "$c1")"
 check "extract_ref v1.2.0" "v1.2.0" "$(extract_ref "$c3")"
 
+# 8. Regex-escaping: a path with a literal '.' standing in for CANON's '.'
+# (e.g. "plures/Xgithub/Xgithub/workflows/ciXreusable.yml" using any char in
+# place of the dots) must NOT be treated as a match — proves '.' isn't being
+# used as a regex wildcard.
+c8='jobs:
+  ci:
+    uses: plures/Xgithub/Xgithub/workflows/ciXreusable.yml@main'
+check "dot-metachar path is not a false-positive match" "0" "$(is_delegating "$c8")"
+check "dot-metachar path classifies as LOCAL, not OK" "LOCAL" "$(classify "$c8")"
+
+# 9. ere_escape helper: literal specials come back escaped
+check "ere_escape dot" '\.' "$(ere_escape '.')"
+check "ere_escape slash-path" 'a/b\.c' "$(ere_escape 'a/b.c')"
+
+# 10. is_full_sha helper
+check "is_full_sha true" "1" "$(is_full_sha "abcdef1234567890abcdef1234567890abcdef12")"
+check "is_full_sha false (short)" "0" "$(is_full_sha "abc123")"
+check "is_full_sha false (branch name)" "0" "$(is_full_sha "my-branch")"
+
 if [ "$fail" -eq 1 ]; then
   echo "SELFTEST FAILED"
   exit 1
