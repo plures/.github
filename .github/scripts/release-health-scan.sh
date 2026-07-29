@@ -33,8 +33,24 @@ STALE_SECS=$(( STALE_DAYS * 86400 ))
 
 stale_list=""
 failed_list=""
+no_workflow_list=""
 ok_count=0
 skip_count=0
+
+# Repos where installing the standard reusable release.yml wrapper is a safe,
+# deterministic, additive change -- direct commit to default branch, no PR,
+# since these changes are mechanical and reversible.
+REMEDIABLE_NO_WORKFLOW="pares-umbra plureslm-openclaw"
+# Repos with no release.yml that are NOT auto-remediated because the fix is
+# NOT mechanical -- each needs an explicit decision, logged to issue #18
+# rather than silently applied or silently skipped:
+#   - bitcoin-recovery : PRIVATE repo -- open question whether private utility
+#                        repos should even be in the release cadence at all.
+#   - praxis-lang      : has its own tag-push-triggered release.yml already
+#                        (so it's not actually in the "no release.yml" bucket --
+#                        listed here only as a reminder it needs a DIFFERENT
+#                        kind of decision: converting its trigger model, not
+#                        installing a missing file).
 
 # SANCTIONED non-reusable release paths. These repos intentionally do NOT use
 # release-reusable.yml because their release model is genuinely different, and
@@ -54,8 +70,18 @@ SANCTIONED_NONREUSABLE="netops-toolkit praxis-lang"
 repos=$(gh repo list plures --limit 200 --no-archived --json name --jq '.[].name')
 
 for r in $repos; do
-  # Must have a release.yml to be release-bearing; else skip.
+  # Must have a release.yml to be release-bearing; otherwise flag it as a
+  # NO_RELEASE_WORKFLOW gap (previously silently skipped -- that's exactly the
+  # blind spot that let pares-umbra/plureslm-openclaw go unnoticed).
   if ! gh api "repos/plures/$r/contents/.github/workflows/release.yml" --silent 2>/dev/null; then
+    case " $REMEDIABLE_NO_WORKFLOW " in
+      *" $r "*)
+        no_workflow_list="${no_workflow_list}  - ${r}: no release.yml (in REMEDIABLE_NO_WORKFLOW -- run remediate-missing-release-workflow.sh to fix)\n"
+        ;;
+      *)
+        no_workflow_list="${no_workflow_list}  - ${r}: no release.yml (needs a decision -- see plures/.github#18)\n"
+        ;;
+    esac
     skip_count=$((skip_count+1)); continue
   fi
 
@@ -119,10 +145,16 @@ if [ -n "$stale_list" ]; then
   printf '%b' "$stale_list"
   echo ""
 fi
-if [ -z "$failed_list" ] && [ -z "$stale_list" ]; then
+if [ -n "$no_workflow_list" ]; then
+  echo "### 🚫 NO RELEASE WORKFLOW (repo has commits but no release.yml at all)"
+  printf '%b' "$no_workflow_list"
+  echo ""
+fi
+if [ -z "$failed_list" ] && [ -z "$stale_list" ] && [ -z "$no_workflow_list" ]; then
   echo "### ✅ All release-bearing repos healthy"
 fi
-echo "_ok=${ok_count} skipped(no release.yml)=${skip_count}_"
+no_workflow_n=$(printf '%b' "$no_workflow_list" | grep -c '^  - ' || true)
+echo "_ok=${ok_count} no_release_workflow=${no_workflow_n:-0}_"
 
 # Emit machine-readable signal for the workflow to decide alerting.
 stale_n=$(printf '%b' "$stale_list" | grep -c '^  - ' || true)
@@ -130,4 +162,5 @@ failed_n=$(printf '%b' "$failed_list" | grep -c '^  - ' || true)
 {
   echo "stale_count=${stale_n:-0}"
   echo "failed_count=${failed_n:-0}"
+  echo "no_workflow_count=${no_workflow_n:-0}"
 } >> "${GITHUB_OUTPUT:-/dev/stderr}"
