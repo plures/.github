@@ -225,30 +225,30 @@ jobs:
             # computing is_even/is_prerelease/should_build_installers, so an operator-forced
             # even-minor release (e.g. 3.2.0) silently skipped the installer-build job even on
             # parity-law opted-in repos. Apply the same parity rule here.
-PARITY_LAW="${{ steps.detect.outputs.parity_law }}"
-TARGET_MINOR_RAW=$(echo "$TARGET_VERSION" | cut -d. -f2)
-TARGET_MINOR=$((10#$TARGET_MINOR_RAW))
+            PARITY_LAW="${{ steps.detect.outputs.parity_law }}"
+            TARGET_MINOR_RAW=$(echo "$TARGET_VERSION" | cut -d. -f2)
+            TARGET_MINOR=$((10#$TARGET_MINOR_RAW))
 
-SEMVER_PRERELEASE=false
-case "$TARGET_VERSION" in *-*) SEMVER_PRERELEASE=true ;; esac
+            SEMVER_PRERELEASE=false
+            case "$TARGET_VERSION" in *-*) SEMVER_PRERELEASE=true ;; esac
 
-IS_EVEN=false
-PARITY_PRERELEASE=false
-if [ "$PARITY_LAW" = "true" ] && [ $((TARGET_MINOR % 2)) -eq 0 ]; then
-  IS_EVEN=true
-elif [ "$PARITY_LAW" = "true" ]; then
-  PARITY_PRERELEASE=true
-fi
+            IS_EVEN=false
+            PARITY_PRERELEASE=false
+            if [ "$PARITY_LAW" = "true" ] && [ $((TARGET_MINOR % 2)) -eq 0 ]; then
+              IS_EVEN=true
+            elif [ "$PARITY_LAW" = "true" ]; then
+              PARITY_PRERELEASE=true
+            fi
 
-IS_PRERELEASE=false
-if [ "$SEMVER_PRERELEASE" = "true" ] || [ "$PARITY_PRERELEASE" = "true" ]; then
-  IS_PRERELEASE=true
-fi
+            IS_PRERELEASE=false
+            if [ "$SEMVER_PRERELEASE" = "true" ] || [ "$PARITY_PRERELEASE" = "true" ]; then
+              IS_PRERELEASE=true
+            fi
 
-BUILD_INSTALLERS=false
-if [ "$PARITY_LAW" = "true" ] && [ "$IS_EVEN" = "true" ] && [ "$IS_PRERELEASE" != "true" ]; then
-  BUILD_INSTALLERS=true
-fi
+            BUILD_INSTALLERS=false
+            if [ "$PARITY_LAW" = "true" ] && [ "$IS_EVEN" = "true" ] && [ "$IS_PRERELEASE" != "true" ]; then
+              BUILD_INSTALLERS=true
+            fi
             echo "is_even=$IS_EVEN" >> $GITHUB_OUTPUT
             echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
             echo "should_build_installers=$BUILD_INSTALLERS" >> $GITHUB_OUTPUT
