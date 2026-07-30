@@ -164,7 +164,11 @@ jobs:
           cache-on-failure: true
 
       - name: Setup pnpm
-        if: steps.gate.outputs.run == 'true'
+        # BUGFIX: unconditional pnpm/action-setup errors on "Invalid packageManager
+        # field in package.json" for repos whose root package.json declares npm/yarn
+        # (e.g. azuredevops-integration-extension). Only run it when frontend_install
+        # actually invokes pnpm.
+        if: steps.gate.outputs.run == 'true' && contains(inputs.frontend_install, 'pnpm')
         uses: pnpm/action-setup@v4
 
       - name: Setup Node
@@ -418,7 +422,11 @@ jobs:
           cache-on-failure: true
 
       - name: Setup pnpm
-        if: steps.gate.outputs.run == 'true'
+        # BUGFIX: unconditional pnpm/action-setup errors on "Invalid packageManager
+        # field in package.json" for repos whose root package.json declares npm/yarn
+        # (e.g. azuredevops-integration-extension). Only run it when frontend_install
+        # actually invokes pnpm.
+        if: steps.gate.outputs.run == 'true' && contains(inputs.frontend_install, 'pnpm')
         uses: pnpm/action-setup@v4
 
       - name: Setup Node
@@ -515,7 +523,11 @@ jobs:
           if ! command -v pod >/dev/null 2>&1; then brew install cocoapods; fi
 
       - name: Setup pnpm
-        if: steps.gate.outputs.run == 'true'
+        # BUGFIX: unconditional pnpm/action-setup errors on "Invalid packageManager
+        # field in package.json" for repos whose root package.json declares npm/yarn
+        # (e.g. azuredevops-integration-extension). Only run it when frontend_install
+        # actually invokes pnpm.
+        if: steps.gate.outputs.run == 'true' && contains(inputs.frontend_install, 'pnpm')
         uses: pnpm/action-setup@v4
 
       - name: Setup Node
