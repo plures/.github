@@ -50,6 +50,16 @@ on:
         required: false
         type: boolean
         default: false
+      frontend_install:
+        description: "Command to install frontend deps for the Tauri build (passed through to build-installers). Defaults to pnpm; override for npm/yarn repos."
+        required: false
+        type: string
+        default: "pnpm install --frozen-lockfile"
+      frontend_build:
+        description: "Command to build the frontend before the Tauri bundle step (passed through to build-installers)."
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: release-reusable-${{ github.repository }}-${{ github.ref_name }}
@@ -632,6 +642,8 @@ jobs:
       version: ${{ needs.prepare.outputs.new_version }}
       platform_targets: ${{ needs.prepare.outputs.platform_targets }}
       tauri_project_path: ${{ needs.prepare.outputs.tauri_project_path }}
+      frontend_install: ${{ inputs.frontend_install }}
+      frontend_build: ${{ inputs.frontend_build }}
     secrets: inherit
 
   # ──────────────────────────────────────────────────────────────────

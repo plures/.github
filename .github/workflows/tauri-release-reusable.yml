@@ -158,8 +158,9 @@ jobs:
           # Per-OS + per-target-triple cache key so legs never clobber each other.
           key: ${{ matrix.rust_target }}
           # BUGFIX: hardcoded ". -> target" broke nested Tauri apps (e.g. apps/app-desktop)
-          # with "could not find Cargo.toml" - point at the actual project path.
-          workspaces: "${{ inputs.tauri_project_path }} -> target"
+          # with "could not find Cargo.toml" - point at the actual Cargo workspace root
+          # (tauri_project_path is the tauri-action frontend root that CONTAINS src-tauri/).
+          workspaces: "${{ inputs.tauri_project_path }}/src-tauri -> target"
           cache-on-failure: true
 
       - name: Setup pnpm
@@ -171,7 +172,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
-          cache: pnpm
+          # BUGFIX: hardcoded cache: pnpm broke npm-based repos (no pnpm lockfile to key
+          # off). frontend_install is overridable per-repo; skip built-in npm/yarn/pnpm
+          # caching here rather than assume pnpm - Swatinem/rust-cache already covers
+          # the expensive cargo side.
 
       - name: Install frontend deps
         if: steps.gate.outputs.run == 'true'
@@ -422,7 +426,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
-          cache: pnpm
+          # BUGFIX: hardcoded cache: pnpm broke npm-based repos (no pnpm lockfile to key
+          # off). frontend_install is overridable per-repo; skip built-in npm/yarn/pnpm
+          # caching here rather than assume pnpm - Swatinem/rust-cache already covers
+          # the expensive cargo side.
 
       - name: Install frontend deps
         if: steps.gate.outputs.run == 'true'
@@ -516,7 +523,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
-          cache: pnpm
+          # BUGFIX: hardcoded cache: pnpm broke npm-based repos (no pnpm lockfile to key
+          # off). frontend_install is overridable per-repo; skip built-in npm/yarn/pnpm
+          # caching here rather than assume pnpm - Swatinem/rust-cache already covers
+          # the expensive cargo side.
 
       - name: Install frontend deps
         if: steps.gate.outputs.run == 'true'
