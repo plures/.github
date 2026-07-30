@@ -747,14 +747,31 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install
 
+      # Package the .vsix locally first so it lands on the GitHub Release
+      # regardless of marketplace publish outcome (PAT expiry, etc.) -- this
+      # step must never be skipped, since it's the source of the release asset.
+      - name: Package .vsix
+        run: npx vsce package
+
+      - name: Upload .vsix to GitHub Release
+        run: |
+          VSIX_FILE=$(ls -1 *.vsix | head -1)
+          if [ -z "$VSIX_FILE" ]; then
+            echo "::error::vsce package produced no .vsix file"
+            exit 1
+          fi
+          gh release upload "v${{ needs.prepare.outputs.new_version }}" "$VSIX_FILE" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to VS Code Marketplace
         if: true  # publishes to VS Code Marketplace if VSCE_PAT exists
         run: |
-          npx vsce publish -p "${{ secrets.VSCE_PAT }}"
+          npx vsce publish -p "${{ secrets.VSCE_PAT }}" --packagePath *.vsix
         continue-on-error: true
 
       - name: Publish to Open VSX
         if: true  # publishes to Open VSX if OVSX_PAT exists
         run: |
-          npx ovsx publish -p "${{ secrets.OVSX_PAT }}"
+          npx ovsx publish *.vsix -p "${{ secrets.OVSX_PAT }}"
         continue-on-error: true
