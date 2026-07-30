@@ -157,7 +157,9 @@ jobs:
         with:
           # Per-OS + per-target-triple cache key so legs never clobber each other.
           key: ${{ matrix.rust_target }}
-          workspaces: ". -> target"
+          # BUGFIX: hardcoded ". -> target" broke nested Tauri apps (e.g. apps/app-desktop)
+          # with "could not find Cargo.toml" - point at the actual project path.
+          workspaces: "${{ inputs.tauri_project_path }} -> target"
           cache-on-failure: true
 
       - name: Setup pnpm
