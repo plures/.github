@@ -687,8 +687,17 @@ jobs:
             ${{ needs.prepare.outputs.pkg_manager }} run build
           fi
 
-      - name: Publish to npm
-        if: true  # publishes to npm if NPM_TOKEN secret exists
+      - name: Publish to npm (registry.npmjs.org)
+        id: npm_publish
+        # NOTE: this step is the authoritative publish target - it is what
+        # `npm install <pkg>` resolves against for the whole world. It must
+        # NOT silently swallow failures: a prior version of this workflow set
+        # continue-on-error:true here with an unconditional GitHub Packages
+        # fallback afterward, which made the job report success even when the
+        # real npmjs.org publish 404'd (e.g. missing/invalid NPM_TOKEN). That
+        # masked real outages across multiple repos (confirmed on
+        # plures/praxis@2.8.0 and elsewhere) - packages looked "released" but
+        # were never actually available via `npm install`.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # --provenance: attaches OIDC-based provenance attestation linking the
@@ -703,9 +712,12 @@ jobs:
           if [ "${{ needs.prepare.outputs.is_prerelease }}" = "true" ]; then NPM_TAG=next; fi
           echo "Publishing to npm under dist-tag: $NPM_TAG"
           npm publish --ignore-scripts --access public --provenance --tag "$NPM_TAG"
-        continue-on-error: true
 
-      - name: Publish to GitHub Packages
+      - name: Publish to GitHub Packages (supplementary mirror only)
+        # This is a secondary internal mirror, NOT a substitute for the real
+        # npmjs.org publish above. It only runs if the real publish succeeded,
+        # so a broken NPM_TOKEN can no longer hide behind a "successful" job.
+        if: success()
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
