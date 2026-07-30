@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: "src-tauri"
+      tauri_project_path:
+        description: "Directory tauri-action runs in (the frontend root that CONTAINS src-tauri/); '.' for repo-root apps, e.g. 'apps/app-desktop' for nested apps"
+        required: false
+        type: string
+        default: "."
       frontend_install:
         description: "Command to install frontend deps (run before build)"
         required: false
@@ -195,7 +200,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          projectPath: "."
+          projectPath: ${{ inputs.tauri_project_path }}
           tauriScript: pnpm tauri
           # Attach built installers to the EXISTING release (matched by tag) that
           # release-reusable.yml already created. tauri-action finds it by tagName.
