@@ -816,6 +816,20 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install
 
+      - name: Build VS Code extension
+        # `vsce package` only packages an existing extension bundle: it does
+        # not reliably build `main` first. Prefer the standard VS Code hook
+        # when the extension declares one; otherwise honour the conventional
+        # compile script. This makes missing build output a visible build-stage
+        # failure instead of a late, opaque `vsce` entrypoint error.
+        shell: bash
+        run: |
+          if node -e "const s=require('./package.json').scripts||{}; process.exit(s['vscode:prepublish'] ? 0 : 1)"; then
+            npm run vscode:prepublish
+          else
+            npm run compile --if-present
+          fi
+
       # Package the .vsix locally first so it lands on the GitHub Release
       # regardless of marketplace publish outcome (PAT expiry, etc.) -- this
       # step must never be skipped, since it's the source of the release asset.
