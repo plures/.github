@@ -699,11 +699,11 @@ jobs:
         # looked "released" but were never actually available via `npm install`.
         #
         # Authentication: uses npm Trusted Publishers (OIDC keyless publishing).
-        # Each package on npmjs.org must be configured to trust this repository
-        # via Settings > Publishing access > Add trusted publisher. The OIDC
-        # token is provided automatically by the `id-token: write` permission
-        # and `setup-node` with `registry-url` configured above.
-        # No static NPM_TOKEN secret is required.
+        # Each package on npmjs.org must be configured to trust the *caller* repo/workflow
+        # that triggers this reusable workflow (e.g. plures/praxis + `release.yml`), since npm
+        # matches the publishing repository's workflow filename (under `.github/workflows/`)
+        # rather than the called reusable workflow file in plures/.github.
+        # No static NPM_TOKEN secret is required once trusted publishing is configured.
         #
         # --provenance: attaches a Sigstore-signed attestation linking the
         # published package to this exact GitHub Actions workflow run/commit.
