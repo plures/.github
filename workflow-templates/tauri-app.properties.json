@@ -1,0 +1,6 @@
+{
+  "name": "Plures Tauri v2 App CI",
+  "description": "Lint, type-check, clippy, test, and build Tauri v2 desktop apps on Linux/macOS/Windows. Releases via the org reusable workflow.",
+  "iconName": "desktop-download",
+  "categories": ["Continuous integration", "Continuous deployment"]
+}

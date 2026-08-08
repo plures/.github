@@ -1,0 +1,6 @@
+{
+  "name": "Plures SvelteKit / Svelte 5 CI",
+  "description": "Lint, format-check, type-check, Vitest unit tests, Playwright integration tests, and build for SvelteKit apps. Releases via the org reusable workflow.",
+  "iconName": "browser",
+  "categories": ["Continuous integration", "Continuous deployment"]
+}
