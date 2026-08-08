@@ -694,17 +694,20 @@ jobs:
         # NOT silently swallow failures: a prior version of this workflow set
         # continue-on-error:true here with an unconditional GitHub Packages
         # fallback afterward, which made the job report success even when the
-        # real npmjs.org publish 404'd (e.g. missing/invalid NPM_TOKEN). That
-        # masked real outages across multiple repos (confirmed on
-        # plures/praxis@2.8.0 and elsewhere) - packages looked "released" but
-        # were never actually available via `npm install`.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        # --provenance: attaches OIDC-based provenance attestation linking the
-        # published package to this GitHub Actions workflow run. Requires
-        # id-token: write permission (set at workflow level). Once npm packages
-        # are configured to trust this repo as a "Trusted Publisher", provenance
-        # enables keyless publishing without static NPM_TOKEN.
+        # real npmjs.org publish 404'd. That masked real outages across multiple
+        # repos (confirmed on plures/praxis@2.8.0 and elsewhere) - packages
+        # looked "released" but were never actually available via `npm install`.
+        #
+        # Authentication: uses npm Trusted Publishers (OIDC keyless publishing).
+        # Each package on npmjs.org must be configured to trust this repository
+        # via Settings > Publishing access > Add trusted publisher. The OIDC
+        # token is provided automatically by the `id-token: write` permission
+        # and `setup-node` with `registry-url` configured above.
+        # No static NPM_TOKEN secret is required.
+        #
+        # --provenance: attaches a Sigstore-signed attestation linking the
+        # published package to this exact GitHub Actions workflow run/commit.
+        #
         # Parity: prereleases (odd/dev lines) publish under the 'next' dist-tag so
         # `npm install <pkg>` (which resolves 'latest') never picks up a dev build.
         run: |
@@ -716,7 +719,7 @@ jobs:
       - name: Publish to GitHub Packages (supplementary mirror only)
         # This is a secondary internal mirror, NOT a substitute for the real
         # npmjs.org publish above. It only runs if the real publish succeeded,
-        # so a broken NPM_TOKEN can no longer hide behind a "successful" job.
+        # so a failed publish can no longer hide behind a "successful" job.
         if: success()
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
