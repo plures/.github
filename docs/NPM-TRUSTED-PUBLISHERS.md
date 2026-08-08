@@ -21,8 +21,8 @@ For each `@plures/*` package, a maintainer with **admin** access on npmjs.org mu
 2. Under **Publishing access**, click **Add trusted publisher**
 3. Configure:
    - **Repository owner:** `plures`
-   - **Repository name:** `.github`
-   - **Workflow filename:** `release-reusable.yml`
+   - **Repository name:** `<package-repo>` (e.g. `praxis`, `pluresdb`)
+   - **Workflow filename:** `release.yml` (the workflow in that repo that calls `release-reusable.yml`)
    - **Environment:** *(leave blank)*
 4. Save
 
