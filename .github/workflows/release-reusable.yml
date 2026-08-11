@@ -496,6 +496,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # A GitHub Actions token cannot create a new branch by git-push when that
+      # branch's history first introduces workflow files.  Record the protected
+      # base ref so the GitHub API can create the branch at an already-visible
+      # commit; the subsequent push contains only the version/changelog commit.
+      - name: Record release-preparation base
+        id: release_base
+        if: needs.prepare.outputs.release_commit_exists != 'true'
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Bump version in package.json
         if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_npm == 'true'
         run: |
@@ -636,6 +645,15 @@ jobs:
           VERSION="${{ needs.prepare.outputs.new_version }}"
           BRANCH="release/v${VERSION}"
           BASE="${{ github.ref_name }}"
+
+          # Create the remote ref through the API before pushing the generated
+          # release commit.  This respects protected main and avoids the GitHub
+          # App workflow-permission guard on a brand-new branch.
+          if ! git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            gh api --method POST "repos/${{ github.repository }}/git/refs" \
+              -f "ref=refs/heads/$BRANCH" \
+              -f "sha=${{ steps.release_base.outputs.sha }}"
+          fi
 
           git switch -c "$BRANCH"
           git push --force-with-lease origin "HEAD:$BRANCH"
