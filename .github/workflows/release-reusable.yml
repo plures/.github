@@ -67,6 +67,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
   packages: write
   id-token: write
 
@@ -78,6 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.decide.outputs.should_release }}
+      release_commit_exists: ${{ steps.decide.outputs.release_commit_exists }}
       new_version: ${{ steps.decide.outputs.new_version }}
       bump_type: ${{ steps.decide.outputs.bump_type }}
       is_even: ${{ steps.decide.outputs.is_even }}
@@ -219,6 +221,21 @@ jobs:
           FORCED_BUMP="${{ inputs.bump }}"
           TARGET_VERSION="${{ inputs.target_version }}"
           CURRENT="${{ steps.detect.outputs.current_version }}"
+          RELEASE_COMMIT_EXISTS=false
+
+          # A protected branch cannot accept the generated version commit directly.
+          # When a release-preparation PR has merged, its title is the durable marker
+          # that this exact manifest version is ready to tag and publish.  Finalize it
+          # without generating a second bump or changelog entry.
+          if [ -z "$TARGET_VERSION" ] \
+             && [ -n "$CURRENT" ] \
+             && git log -1 --format=%s | grep -qE "^chore\\(release\\): v${CURRENT}(\\s|$)" \
+             && ! git rev-parse -q --verify "refs/tags/v${CURRENT}" >/dev/null; then
+            TARGET_VERSION="$CURRENT"
+            RELEASE_COMMIT_EXISTS=true
+            echo "Finalizing merged release-preparation commit for v$CURRENT"
+          fi
+          echo "release_commit_exists=$RELEASE_COMMIT_EXISTS" >> $GITHUB_OUTPUT
 
           # target_version takes highest precedence — milestone-driven releases
           if [ -n "$TARGET_VERSION" ]; then
@@ -480,7 +497,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version in package.json
-        if: needs.prepare.outputs.has_npm == 'true'
+        if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_npm == 'true'
         run: |
           node -e "
             const pkg = require('./package.json');
@@ -489,7 +506,7 @@ jobs:
           "
 
       - name: Bump version in deno.json
-        if: needs.prepare.outputs.has_deno == 'true'
+        if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_deno == 'true'
         run: |
           if [ -f deno.json ]; then
             node -e "
@@ -500,7 +517,7 @@ jobs:
           fi
 
       - name: Bump version in Cargo.toml
-        if: needs.prepare.outputs.has_cargo == 'true'
+        if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_cargo == 'true'
         run: |
           # Handle [workspace.package] version vs top-level version
           if grep -q '^\[workspace\.package\]' Cargo.toml; then
@@ -514,10 +531,10 @@ jobs:
       # refresh the lock's workspace-member entries. `cargo update --workspace` re-resolves
       # ONLY workspace crates (external deps untouched) — verified no dependency drift.
       - name: Sync Cargo.lock to bumped version
-        if: needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
+        if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
         uses: dtolnay/rust-toolchain@stable
       - name: Refresh Cargo.lock workspace versions
-        if: needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
+        if: needs.prepare.outputs.release_commit_exists != 'true' && needs.prepare.outputs.has_cargo == 'true' && hashFiles('Cargo.lock') != ''
         run: |
           cargo update --workspace
           # Fail loudly if the lock is still out of sync (guards against silent drift).
@@ -525,6 +542,7 @@ jobs:
           echo "✓ Cargo.lock synced to ${{ needs.prepare.outputs.new_version }}"
 
       - name: Sync version across all version-bearing files
+        if: needs.prepare.outputs.release_commit_exists != 'true'
         run: |
           VERSION="${{ needs.prepare.outputs.new_version }}"
           echo "Syncing version $VERSION across all project files..."
@@ -574,6 +592,7 @@ jobs:
 
       - name: Generate changelog entry
         id: changelog
+        if: needs.prepare.outputs.release_commit_exists != 'true'
         run: |
           VERSION="${{ needs.prepare.outputs.new_version }}"
           DATE=$(date +%Y-%m-%d)
@@ -604,23 +623,62 @@ jobs:
           echo "notes_file=/tmp/release-notes.md" >> $GITHUB_OUTPUT
 
       - name: Commit version bump
+        if: needs.prepare.outputs.release_commit_exists != 'true'
         run: |
           git add -A
           git commit -m "chore(release): v${{ needs.prepare.outputs.new_version }}" || echo "Nothing to commit"
 
+      - name: Open and auto-merge release-preparation PR
+        if: inputs.dry_run != true && needs.prepare.outputs.release_commit_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.new_version }}"
+          BRANCH="release/v${VERSION}"
+          BASE="${{ github.ref_name }}"
+
+          git switch -c "$BRANCH"
+          git push --force-with-lease origin "HEAD:$BRANCH"
+
+          PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url')
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr create \
+              --repo "${{ github.repository }}" \
+              --base "$BASE" \
+              --head "$BRANCH" \
+              --title "chore(release): v${VERSION}" \
+              --body "Automated release preparation. Once required checks pass, merging this PR tags and publishes v${VERSION} from protected $BASE.")
+          fi
+
+          # Auto-merge respects required checks and reviews.  If the repository has
+          # disabled auto-merge, retain the ready PR for a maintainer rather than
+          # bypassing protection or publishing an unmerged commit.
+          gh pr merge "$PR_URL" --auto --squash || \
+            echo "Auto-merge was unavailable; release preparation remains at $PR_URL"
+
+      - name: Generate release notes from merged preparation commit
+        if: needs.prepare.outputs.release_commit_exists == 'true'
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            git log --oneline --format="- %s (%h)" > /tmp/release-notes.md
+          else
+            git log "${LAST_TAG}..HEAD" --oneline --format="- %s (%h)" > /tmp/release-notes.md
+          fi
+
       - name: Create and push tag
-        if: inputs.dry_run != true
+        if: inputs.dry_run != true && needs.prepare.outputs.release_commit_exists == 'true'
         run: |
           TAG="v${{ needs.prepare.outputs.new_version }}"
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag ${TAG} already exists on origin, skipping tag creation."
           else
             git tag "${TAG}"
-            git push origin HEAD:${{ github.ref_name }} --tags
+            git push origin "${TAG}"
           fi
 
       - name: Create GitHub Release
-        if: inputs.dry_run != true
+        if: inputs.dry_run != true && needs.prepare.outputs.release_commit_exists == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.prepare.outputs.new_version }}
@@ -636,7 +694,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   build-installers:
     needs: [prepare, release]
-    if: needs.prepare.outputs.should_build_installers == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.should_build_installers == 'true' && inputs.dry_run != true
     uses: plures/.github/.github/workflows/tauri-release-reusable.yml@main
     with:
       version: ${{ needs.prepare.outputs.new_version }}
@@ -652,7 +710,7 @@ jobs:
 
   publish-npm:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_napi != 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_napi != 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -734,7 +792,7 @@ jobs:
 
   publish-jsr:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_deno == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_deno == 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -754,7 +812,7 @@ jobs:
 
   publish-cargo:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_cargo == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_cargo == 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -772,7 +830,7 @@ jobs:
 
   publish-docker:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_docker == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_docker == 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -805,7 +863,7 @@ jobs:
 
   publish-vscode:
     needs: [prepare, release]
-    if: needs.prepare.outputs.has_vscode == 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_vscode == 'true' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
