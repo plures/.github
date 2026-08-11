@@ -655,14 +655,14 @@ jobs:
               -f "sha=${{ steps.release_base.outputs.sha }}"
           fi
 
-            git switch -c "$BRANCH"
-            # The API call above may have created this ref in the remote after
-            # the checkout was fetched.  A lease would then reject the first
-            # push because the runner has no local tracking value for it.
-            # This commit is based on release_base, so an ordinary push is the
-            # safe fast-forward operation and still rejects an unexpected
-            # remote update.
-            git push origin "HEAD:$BRANCH"
+          git switch -c "$BRANCH"
+          # The API call above may have created this ref in the remote after
+          # the checkout was fetched. `git push --force-with-lease` would then
+          # reject the first push because the runner has no local tracking value.
+          # This commit is based on the release base SHA, so an ordinary push is
+          # the safe fast-forward operation and still rejects an unexpected
+          # remote update.
+          git push origin "HEAD:$BRANCH"
 
           PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url')
           if [ -z "$PR_URL" ]; then
