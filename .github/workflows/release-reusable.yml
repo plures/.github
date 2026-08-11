@@ -424,7 +424,6 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true' && inputs.skip_tests != true
     runs-on: ubuntu-latest
-    continue-on-error: true  # Tests are advisory — don't block releases
     steps:
       - uses: actions/checkout@v4
 
@@ -481,7 +480,8 @@ jobs:
     if: |
       always() &&
       needs.prepare.outputs.should_release == 'true' &&
-      needs.prepare.result == 'success'
+      needs.prepare.result == 'success' &&
+      (inputs.skip_tests == true || needs.test.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       tag: v${{ needs.prepare.outputs.new_version }}
