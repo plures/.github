@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: ""
+      recovery_tag:
+        description: "Optional existing package tag to release and publish without creating a new version"
+        required: false
+        type: string
+        default: ""
       npm_dist_tag:
         description: "npm dist-tag used for publication"
         required: false
@@ -52,6 +57,7 @@ jobs:
       new_version: ${{ steps.decide.outputs.new_version }}
       tag: ${{ steps.decide.outputs.tag }}
       previous_tag: ${{ steps.decide.outputs.previous_tag }}
+      recovery: ${{ steps.decide.outputs.recovery }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,11 +74,35 @@ jobs:
           TAG_PREFIX: ${{ inputs.tag_prefix }}
           BUMP: ${{ inputs.bump }}
           TARGET_VERSION: ${{ inputs.target_version }}
+          RECOVERY_TAG: ${{ inputs.recovery_tag }}
         shell: bash
         run: |
           set -euo pipefail
           PACKAGE_JSON="$PACKAGE_DIRECTORY/package.json"
           test -f "$PACKAGE_JSON"
+
+          if [ -n "$RECOVERY_TAG" ]; then
+            RECOVERY_VERSION="${RECOVERY_TAG#"$TAG_PREFIX"}"
+            if [ "$RECOVERY_VERSION" = "$RECOVERY_TAG" ] || ! [[ "$RECOVERY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "recovery tag must use the package tag prefix and plain SemVer: $RECOVERY_TAG" >&2
+              exit 1
+            fi
+            git rev-parse --verify "refs/tags/$RECOVERY_TAG^{commit}" >/dev/null
+            TAG_MANIFEST_VERSION=$(git show "$RECOVERY_TAG:$PACKAGE_JSON" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+            if [ "$TAG_MANIFEST_VERSION" != "$RECOVERY_VERSION" ]; then
+              echo "recovery tag manifest version does not match its tag: $RECOVERY_TAG" >&2
+              exit 1
+            fi
+            {
+              echo "should_release=true"
+              echo "current_version=$RECOVERY_VERSION"
+              echo "new_version=$RECOVERY_VERSION"
+              echo "tag=$RECOVERY_TAG"
+              echo "previous_tag=$RECOVERY_TAG"
+              echo "recovery=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           MANIFEST_VERSION=$(node -p "require('./$PACKAGE_JSON').version")
           HIGHEST_VERSION=$(git tag -l "${TAG_PREFIX}*" \
@@ -93,11 +123,12 @@ jobs:
             CHANGES=$(git log --format=%B -- "$PACKAGE_DIRECTORY")
           fi
 
-          if [ -z "$CHANGES" ]; then
+          if [ -z "$CHANGES" ] && [ -z "$TARGET_VERSION" ]; then
             {
               echo "should_release=false"
               echo "current_version=$CURRENT_VERSION"
               echo "previous_tag=$PREVIOUS_TAG"
+              echo "recovery=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -147,6 +178,7 @@ jobs:
             echo "new_version=$NEW_VERSION"
             echo "tag=${TAG_PREFIX}${NEW_VERSION}"
             echo "previous_tag=$PREVIOUS_TAG"
+            echo "recovery=false"
           } >> "$GITHUB_OUTPUT"
 
   release:
@@ -159,6 +191,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.recovery == 'true' && needs.prepare.outputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -167,6 +200,7 @@ jobs:
           cache-dependency-path: ${{ inputs.package_directory }}/package-lock.json
 
       - name: Bump package version
+        if: needs.prepare.outputs.recovery != 'true'
         env:
           PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
@@ -181,6 +215,7 @@ jobs:
           npm --prefix "$PACKAGE_DIRECTORY" run build
 
       - name: Commit version and create package tag
+        if: needs.prepare.outputs.recovery != 'true'
         env:
           PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
           RELEASE_NAME: ${{ inputs.release_name }}
@@ -196,8 +231,24 @@ jobs:
             git add -- "$PACKAGE_DIRECTORY/package-lock.json"
           fi
           git commit -m "chore(${RELEASE_NAME}): v${NEW_VERSION}"
-          git tag "$TAG"
-          git push origin "HEAD:${{ github.ref_name }}" "refs/tags/$TAG"
+          for attempt in 1 2 3; do
+            if git push --atomic origin "HEAD:${{ github.ref_name }}" "HEAD:refs/tags/$TAG"; then
+              exit 0
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+              echo "release tag already exists after a rejected atomic push: $TAG" >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "main changed during all three release push attempts" >&2
+              exit 1
+            fi
+            git fetch origin "${{ github.ref_name }}"
+            git rebase "origin/${{ github.ref_name }}"
+            npm --prefix "$PACKAGE_DIRECTORY" ci
+            npm --prefix "$PACKAGE_DIRECTORY" test
+            npm --prefix "$PACKAGE_DIRECTORY" run build
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
