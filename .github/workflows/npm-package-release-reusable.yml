@@ -1,0 +1,236 @@
+name: NPM Package Release Pipeline
+
+# Releases a versioned npm package located below a caller repository root.
+# It deliberately uses a package-scoped tag prefix: a monorepo's root tags
+# must never influence the version of an independently published package.
+
+on:
+  workflow_call:
+    inputs:
+      package_directory:
+        description: "Package directory, relative to the caller repository root"
+        required: true
+        type: string
+      tag_prefix:
+        description: "Immutable package tag prefix, including any trailing separator"
+        required: true
+        type: string
+      release_name:
+        description: "Human-readable package name for commits and releases"
+        required: true
+        type: string
+      bump:
+        description: "Optional patch, minor, or major override"
+        required: false
+        type: string
+        default: ""
+      target_version:
+        description: "Optional exact SemVer version override"
+        required: false
+        type: string
+        default: ""
+      npm_dist_tag:
+        description: "npm dist-tag used for publication"
+        required: false
+        type: string
+        default: latest
+
+concurrency:
+  group: npm-package-release-${{ github.repository }}-${{ inputs.package_directory }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.decide.outputs.should_release }}
+      current_version: ${{ steps.decide.outputs.current_version }}
+      new_version: ${{ steps.decide.outputs.new_version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      previous_tag: ${{ steps.decide.outputs.previous_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Decide package version
+        id: decide
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+          TAG_PREFIX: ${{ inputs.tag_prefix }}
+          BUMP: ${{ inputs.bump }}
+          TARGET_VERSION: ${{ inputs.target_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_JSON="$PACKAGE_DIRECTORY/package.json"
+          test -f "$PACKAGE_JSON"
+
+          MANIFEST_VERSION=$(node -p "require('./$PACKAGE_JSON').version")
+          HIGHEST_VERSION=$(git tag -l "${TAG_PREFIX}*" \
+            | sed "s/^${TAG_PREFIX}//" \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1 || true)
+          CURRENT_VERSION="$MANIFEST_VERSION"
+          if [ -n "$HIGHEST_VERSION" ] && [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$HIGHEST_VERSION" | sort -V | tail -1)" != "$CURRENT_VERSION" ]; then
+            CURRENT_VERSION="$HIGHEST_VERSION"
+          fi
+
+          PREVIOUS_TAG=""
+          if [ -n "$HIGHEST_VERSION" ]; then
+            PREVIOUS_TAG="${TAG_PREFIX}${HIGHEST_VERSION}"
+            CHANGES=$(git log "$PREVIOUS_TAG..HEAD" --format=%B -- "$PACKAGE_DIRECTORY")
+          else
+            CHANGES=$(git log --format=%B -- "$PACKAGE_DIRECTORY")
+          fi
+
+          if [ -z "$CHANGES" ]; then
+            {
+              echo "should_release=false"
+              echo "current_version=$CURRENT_VERSION"
+              echo "previous_tag=$PREVIOUS_TAG"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "$TARGET_VERSION" ]; then
+            NEW_VERSION="$TARGET_VERSION"
+          else
+            BUMP_TYPE="$BUMP"
+            if [ -z "$BUMP_TYPE" ]; then
+              # The first platform release establishes a package-scoped tag.
+              # Do not infer a breaking change from imported history.
+              if [ -z "$PREVIOUS_TAG" ]; then
+                BUMP_TYPE=patch
+              elif grep -Eq '(^[[:alpha:]]+(\([^)]*\))?!:|BREAKING CHANGE:)' <<< "$CHANGES"; then
+                BUMP_TYPE=major
+              elif grep -Eq '^feat(\([^)]*\))?:' <<< "$CHANGES"; then
+                BUMP_TYPE=minor
+              else
+                BUMP_TYPE=patch
+              fi
+            fi
+            NEW_VERSION=$(node - "$CURRENT_VERSION" "$BUMP_TYPE" <<'NODE'
+            const [version, bump] = process.argv.slice(2);
+            const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+            if (!match || !["patch", "minor", "major"].includes(bump)) process.exit(1);
+            let [, major, minor, patch] = match.map(Number);
+            if (bump === "major") { major += 1; minor = 0; patch = 0; }
+            if (bump === "minor") { minor += 1; patch = 0; }
+            if (bump === "patch") { patch += 1; }
+            console.log(`${major}.${minor}.${patch}`);
+            NODE
+            )
+          fi
+
+          if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "target version must be plain SemVer: $NEW_VERSION" >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$NEW_VERSION" | sort -V | tail -1)" != "$NEW_VERSION" ] || [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+            echo "new version must be greater than current version: $CURRENT_VERSION -> $NEW_VERSION" >&2
+            exit 1
+          fi
+
+          {
+            echo "should_release=true"
+            echo "current_version=$CURRENT_VERSION"
+            echo "new_version=$NEW_VERSION"
+            echo "tag=${TAG_PREFIX}${NEW_VERSION}"
+            echo "previous_tag=$PREVIOUS_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ${{ inputs.package_directory }}/package-lock.json
+
+      - name: Bump package version
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: npm --prefix "$PACKAGE_DIRECTORY" version "$NEW_VERSION" --no-git-tag-version
+
+      - name: Validate package
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+        run: |
+          npm --prefix "$PACKAGE_DIRECTORY" ci
+          npm --prefix "$PACKAGE_DIRECTORY" test
+          npm --prefix "$PACKAGE_DIRECTORY" run build
+
+      - name: Commit version and create package tag
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+          RELEASE_NAME: ${{ inputs.release_name }}
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$PACKAGE_DIRECTORY/package.json"
+          if [ -f "$PACKAGE_DIRECTORY/package-lock.json" ]; then
+            git add -- "$PACKAGE_DIRECTORY/package-lock.json"
+          fi
+          git commit -m "chore(${RELEASE_NAME}): v${NEW_VERSION}"
+          git tag "$TAG"
+          git push origin "HEAD:${{ github.ref_name }}" "refs/tags/$TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ inputs.release_name }} v${{ needs.prepare.outputs.new_version }}
+          generate_release_notes: true
+
+  publish-npm:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: ${{ inputs.package_directory }}/package-lock.json
+
+      - name: Build package from immutable tag
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+        run: |
+          npm --prefix "$PACKAGE_DIRECTORY" ci
+          npm --prefix "$PACKAGE_DIRECTORY" run build
+
+      - name: Publish to npm with OIDC provenance
+        env:
+          PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+          NPM_DIST_TAG: ${{ inputs.npm_dist_tag }}
+        run: npm --prefix "$PACKAGE_DIRECTORY" publish --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
