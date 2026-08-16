@@ -98,9 +98,8 @@ jobs:
               echo "current_version=$RECOVERY_VERSION"
               echo "new_version=$RECOVERY_VERSION"
               echo "tag=$RECOVERY_TAG"
-              echo "previous_tag=$RECOVERY_TAG"
+              echo "previous_tag="
               echo "recovery=true"
-            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
