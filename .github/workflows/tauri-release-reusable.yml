@@ -47,6 +47,11 @@ on:
         required: false
         type: string
         default: ""
+      tauri_script:
+        description: "Command that invokes the Tauri CLI (the action appends its build arguments)."
+        required: false
+        type: string
+        default: "pnpm tauri"
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: false
@@ -211,7 +216,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: ${{ inputs.tauri_project_path }}
-          tauriScript: pnpm tauri
+          tauriScript: ${{ inputs.tauri_script }}
           # Attach built installers to the EXISTING release (matched by tag) that
           # release-reusable.yml already created. tauri-action finds it by tagName.
           tagName: v${{ inputs.version }}
