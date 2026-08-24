@@ -662,11 +662,13 @@ jobs:
           REMOTE_REF="refs/heads/$BRANCH"
           BASE_SHA="${{ steps.release_base.outputs.sha }}"
           REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
+          FRESH_BRANCH=false
           if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" != "$BASE_SHA" ]; then
             # A stale release branch has untrusted ownership. Preserve it and
             # prepare this release on a unique branch instead.
             BRANCH="${BRANCH}-${GITHUB_RUN_ID}"
             REMOTE_REF="refs/heads/$BRANCH"
+            FRESH_BRANCH=true
             REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
             if [ -n "$REMOTE_SHA" ]; then
               echo "::error::Refusing to replace existing $BRANCH."
@@ -675,9 +677,18 @@ jobs:
           fi
 
           if [ -z "$REMOTE_SHA" ]; then
-            gh api --method POST "repos/${{ github.repository }}/git/refs" \
+            if ! gh api --method POST "repos/${{ github.repository }}/git/refs" \
               -f "ref=$REMOTE_REF" \
-              -f "sha=$BASE_SHA"
+              -f "sha=$BASE_SHA"; then
+              if [ "$FRESH_BRANCH" = true ]; then
+                exit 1
+              fi
+              REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
+              if [ "$REMOTE_SHA" != "$BASE_SHA" ]; then
+                echo "::error::Refusing to update concurrent $BRANCH."
+                exit 1
+              fi
+            fi
           fi
 
           git switch -c "$BRANCH"
