@@ -662,38 +662,26 @@ jobs:
           REMOTE_REF="refs/heads/$BRANCH"
           BASE_SHA="${{ steps.release_base.outputs.sha }}"
           REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
-          CREATED_REMOTE=false
-          if [ -z "$REMOTE_SHA" ]; then
-            if gh api --method POST "repos/${{ github.repository }}/git/refs" \
-              -f "ref=$REMOTE_REF" \
-              -f "sha=$BASE_SHA"; then
-              REMOTE_SHA="$BASE_SHA"
-              CREATED_REMOTE=true
-            else
-              # Another release run may have created the ref after our lookup.
-              REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
-              [ -n "$REMOTE_SHA" ] || exit 1
-            fi
-          fi
-
-          if [ "$CREATED_REMOTE" != true ] && [ "$REMOTE_SHA" != "$BASE_SHA" ]; then
-            git fetch origin "$REMOTE_REF:refs/remotes/origin/$BRANCH"
-            REMOTE_AUTHOR=$(git log -1 --format='%an <%ae>' "origin/$BRANCH")
-            if [ "$REMOTE_AUTHOR" != "github-actions[bot] <github-actions[bot]@users.noreply.github.com>" ]; then
-              echo "::error::Refusing to replace human-authored $BRANCH ($REMOTE_AUTHOR)."
+          if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" != "$BASE_SHA" ]; then
+            # A stale release branch has untrusted ownership. Preserve it and
+            # prepare this release on a unique branch instead.
+            BRANCH="${BRANCH}-${GITHUB_RUN_ID}"
+            REMOTE_REF="refs/heads/$BRANCH"
+            REMOTE_SHA=$(git ls-remote --heads origin "$REMOTE_REF" | awk '{print $1}')
+            if [ -n "$REMOTE_SHA" ]; then
+              echo "::error::Refusing to replace existing $BRANCH."
               exit 1
             fi
           fi
 
-          git switch -c "$BRANCH"
-          if [ "$CREATED_REMOTE" = true ]; then
-            git push origin "HEAD:$BRANCH"
-          else
-            # A prior release run can leave an automation-owned preparation branch
-            # behind after main advances. Refresh it only when the remote is still
-            # exactly the SHA inspected above; concurrent updates are rejected.
-            git push --force-with-lease="$REMOTE_REF:$REMOTE_SHA" origin "HEAD:$BRANCH"
+          if [ -z "$REMOTE_SHA" ]; then
+            gh api --method POST "repos/${{ github.repository }}/git/refs" \
+              -f "ref=$REMOTE_REF" \
+              -f "sha=$BASE_SHA"
           fi
+
+          git switch -c "$BRANCH"
+          git push origin "HEAD:$BRANCH"
 
           PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url')
           if [ -z "$PR_URL" ]; then
