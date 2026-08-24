@@ -60,6 +60,11 @@ on:
         required: false
         type: string
         default: ""
+      publish_npm:
+        description: "Publish the root package to npmjs.org."
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: release-reusable-${{ github.repository }}-${{ github.ref_name }}
@@ -734,7 +739,7 @@ jobs:
 
   publish-npm:
     needs: [prepare, release]
-    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_napi != 'true' && inputs.dry_run != true
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.has_npm == 'true' && needs.prepare.outputs.has_napi != 'true' && inputs.dry_run != true && inputs.publish_npm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
