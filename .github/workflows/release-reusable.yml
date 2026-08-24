@@ -60,6 +60,11 @@ on:
         required: false
         type: string
         default: ""
+      tauri_script:
+        description: "Command that invokes the Tauri CLI for the installer build."
+        required: false
+        type: string
+        default: "pnpm tauri"
       publish_npm:
         description: "Publish the root package to npmjs.org."
         required: false
@@ -731,6 +736,7 @@ jobs:
       tauri_project_path: ${{ needs.prepare.outputs.tauri_project_path }}
       frontend_install: ${{ inputs.frontend_install }}
       frontend_build: ${{ inputs.frontend_build }}
+      tauri_script: ${{ inputs.tauri_script }}
     secrets: inherit
 
   # ──────────────────────────────────────────────────────────────────
