@@ -564,7 +564,7 @@ jobs:
         if: needs.prepare.outputs.release_commit_exists != 'true'
         run: |
           VERSION="${{ needs.prepare.outputs.new_version }}"
-          echo "Syncing version $VERSION across all project files..."
+          echo "Syncing version $VERSION across all project files..." && node scripts/sync-release-version.mjs "$VERSION"
 
           # Sync tauri.conf.json files (Tauri apps embed version)
           for conf in $(find . -name 'tauri.conf.json' -not -path '*/node_modules/*' -not -path '*/target/*'); do
