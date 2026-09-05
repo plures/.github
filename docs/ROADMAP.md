@@ -1,6 +1,6 @@
 # Public organization roadmap
 
-Plures is building useful tools today and shared foundations for OASIS over time. This repository provides organization-level documentation and shared GitHub resources. Product repositories describe their own release stages and supported scope.
+Plures builds useful software with meaningful control over tools and data. This repository provides organization-level documentation and shared GitHub resources. Product repositories describe their own release stages and supported scope.
 
 ## Near-term outcomes
 
@@ -13,8 +13,8 @@ Plures is building useful tools today and shared foundations for OASIS over time
 
 Products advance when their installation, useful workflow, recovery, rights and support requirements are demonstrated. Paid offerings additionally require clear terms and working billing, cancellation and entitlement handling. Public pages should describe the accepted scope and disclose known limits.
 
-## Building toward OASIS
+## Sustainable development
 
-Successful products fund reusable data, permission, distribution and support capabilities. OASIS will begin with a bounded commerce pilot before broader availability. Lower costs and less unnecessary disclosure are goals to validate through real use and sustainable operation.
+Useful products and sustainable support fund continued development. We prioritize maintainable software, clear choices and improvements informed by actual use.
 
 This is a direction, not a dated delivery promise. Current work and changes belong in the relevant repository's issues, pull requests and release history. Historical discussions remain history; calendar passage does not establish completion.
