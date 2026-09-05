@@ -249,7 +249,7 @@ jobs:
         if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
         uses: actions/upload-artifact@v4
         with:
-          name: installer-candidate-v${{ inputs.version }}-${{ matrix.target }}
+          name: installer-candidate-v${{ inputs.version }}-${{ matrix.rust_target }}
           path: ${{ inputs.tauri_project_path }}/src-tauri/target/release/bundle/**
           retention-days: 14
           if-no-files-found: error
