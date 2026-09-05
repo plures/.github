@@ -50,6 +50,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_development_candidates:
+        description: "Build installable workflow artifacts for prerelease development lines without attaching them to the public GitHub Release."
+        required: false
+        type: boolean
+        default: false
       frontend_install:
         description: "Command to install frontend deps for the Tauri build (passed through to build-installers). Defaults to pnpm; override for npm/yarn repos."
         required: false
@@ -757,6 +762,27 @@ jobs:
       frontend_install: ${{ inputs.frontend_install }}
       frontend_build: ${{ inputs.frontend_build }}
       tauri_script: ${{ inputs.tauri_script }}
+    secrets: inherit
+
+  # ──────────────────────────────────────────────────────────────────
+  # 3c. Development installer candidates (opt-in, workflow artifacts only)
+  # ──────────────────────────────────────────────────────────────────
+  # Development lines are public prereleases but not end-user distribution
+  # channels. An opted-in app can still exercise its real installer before
+  # promotion: the bundle is retained on the workflow run and is never attached
+  # to the GitHub Release.
+  build-development-candidates:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.release_commit_exists == 'true' && needs.prepare.outputs.is_prerelease == 'true' && inputs.build_development_candidates == true && inputs.dry_run != true
+    uses: plures/.github/.github/workflows/tauri-release-reusable.yml@main
+    with:
+      version: ${{ needs.prepare.outputs.new_version }}
+      platform_targets: ${{ needs.prepare.outputs.platform_targets }}
+      tauri_project_path: ${{ needs.prepare.outputs.tauri_project_path }}
+      frontend_install: ${{ inputs.frontend_install }}
+      frontend_build: ${{ inputs.frontend_build }}
+      tauri_script: ${{ inputs.tauri_script }}
+      artifact_only: true
     secrets: inherit
 
   # ──────────────────────────────────────────────────────────────────
