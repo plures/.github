@@ -327,12 +327,20 @@ jobs:
           echo "Built ai.plures.radix.flatpak"
 
       - name: Upload Flatpak to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           files: ai.plures.radix.flatpak
         continue-on-error: true
+
+      - name: Upload Flatpak candidate
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-linux-flatpak
+          path: ai.plures.radix.flatpak
+          retention-days: 14
 
   # ── NixOS: build the flake package + push to pares-cache (NOT an installer format) ──
   nixos:
@@ -496,7 +504,7 @@ jobs:
           echo "android build seconds: $(( $(date +%s) - START ))"
 
       - name: Upload Android artifacts to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
@@ -504,6 +512,16 @@ jobs:
             src-tauri/gen/android/app/build/outputs/**/*.apk
             src-tauri/gen/android/app/build/outputs/**/*.aab
         continue-on-error: true
+
+      - name: Upload Android candidate artifacts
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-android
+          path: |
+            src-tauri/gen/android/app/build/outputs/**/*.apk
+            src-tauri/gen/android/app/build/outputs/**/*.aab
+          retention-days: 14
 
   # ── iOS (DORMANT until "ios" added to platformTargets + Apple creds present) ──
   # Needs macOS + full Xcode + CocoaPods. Cold pod install + SwiftPM resolve + Xcode build is slow;
@@ -600,13 +618,21 @@ jobs:
           echo "ios build seconds: $(( $(date +%s) - START ))"
 
       - name: Upload iOS artifacts to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           files: |
             src-tauri/gen/apple/build/**/*.ipa
         continue-on-error: true
+
+      - name: Upload iOS candidate artifacts
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-ios
+          path: src-tauri/gen/apple/build/**/*.ipa
+          retention-days: 14
 
   # ── Metrics summary: consolidate per-leg cache/build metrics + track savings over time ──
   # Directive B: build-caching must show MEASURED savings that persist across builds.
