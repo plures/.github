@@ -341,6 +341,7 @@ jobs:
           name: installer-candidate-v${{ inputs.version }}-linux-flatpak
           path: ai.plures.radix.flatpak
           retention-days: 14
+          if-no-files-found: error
 
   # ── NixOS: build the flake package + push to pares-cache (NOT an installer format) ──
   nixos:
@@ -522,6 +523,7 @@ jobs:
             src-tauri/gen/android/app/build/outputs/**/*.apk
             src-tauri/gen/android/app/build/outputs/**/*.aab
           retention-days: 14
+          if-no-files-found: error
 
   # ── iOS (DORMANT until "ios" added to platformTargets + Apple creds present) ──
   # Needs macOS + full Xcode + CocoaPods. Cold pod install + SwiftPM resolve + Xcode build is slow;
@@ -633,6 +635,7 @@ jobs:
           name: installer-candidate-v${{ inputs.version }}-ios
           path: src-tauri/gen/apple/build/**/*.ipa
           retention-days: 14
+          if-no-files-found: error
 
   # ── Metrics summary: consolidate per-leg cache/build metrics + track savings over time ──
   # Directive B: build-caching must show MEASURED savings that persist across builds.
