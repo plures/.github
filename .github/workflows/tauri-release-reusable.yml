@@ -1,9 +1,8 @@
 name: Tauri Platform Release (reusable)
 
-# Builds platform installers for a Tauri 2 app and attaches them to an existing
-# GitHub Release. Invoked by release-reusable.yml ONLY when:
-#   is_even(minor) AND publishPlatformInstallers AND dry_run != true
-# (the even/odd parity gate lives in release-reusable.yml; this workflow trusts that gate).
+# Builds platform installers for a Tauri 2 app and either attaches them to an
+# existing GitHub Release or retains them as workflow-only candidate artifacts.
+# release-reusable.yml owns the even/odd parity and candidate-channel gates.
 #
 # Design contract: development-guide/design/TAURI-BEST-PRACTICES.md
 #                  pares-radix/.praxis/decisions/ADR-0029-even-odd-release-gating.md
@@ -52,6 +51,11 @@ on:
         required: false
         type: string
         default: "pnpm tauri"
+      artifact_only:
+        description: "Retain bundles as workflow artifacts instead of attaching them to the GitHub Release."
+        required: false
+        type: boolean
+        default: false
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: false
@@ -201,7 +205,7 @@ jobs:
         run: echo "epoch=$(date +%s)" >> $GITHUB_OUTPUT
 
       - name: Build + upload Tauri bundles
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -222,6 +226,33 @@ jobs:
           # release-reusable.yml already created. tauri-action finds it by tagName.
           tagName: v${{ inputs.version }}
           args: ${{ matrix.args }}
+
+      - name: Build Tauri candidate bundles
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: ${{ inputs.tauri_project_path }}
+          tauriScript: ${{ inputs.tauri_script }}
+          args: ${{ matrix.args }}
+
+      - name: Upload installer candidate
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-${{ matrix.rust_target }}
+          path: ${{ inputs.tauri_project_path }}/src-tauri/target/release/bundle/**
+          retention-days: 14
+          if-no-files-found: error
 
       - name: Cache + build metrics
         if: steps.gate.outputs.run == 'true'
@@ -296,12 +327,21 @@ jobs:
           echo "Built ai.plures.radix.flatpak"
 
       - name: Upload Flatpak to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           files: ai.plures.radix.flatpak
         continue-on-error: true
+
+      - name: Upload Flatpak candidate
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-linux-flatpak
+          path: ai.plures.radix.flatpak
+          retention-days: 14
+          if-no-files-found: error
 
   # ── NixOS: build the flake package + push to pares-cache (NOT an installer format) ──
   nixos:
@@ -465,7 +505,7 @@ jobs:
           echo "android build seconds: $(( $(date +%s) - START ))"
 
       - name: Upload Android artifacts to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
@@ -473,6 +513,17 @@ jobs:
             src-tauri/gen/android/app/build/outputs/**/*.apk
             src-tauri/gen/android/app/build/outputs/**/*.aab
         continue-on-error: true
+
+      - name: Upload Android candidate artifacts
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-android
+          path: |
+            src-tauri/gen/android/app/build/outputs/**/*.apk
+            src-tauri/gen/android/app/build/outputs/**/*.aab
+          retention-days: 14
+          if-no-files-found: error
 
   # ── iOS (DORMANT until "ios" added to platformTargets + Apple creds present) ──
   # Needs macOS + full Xcode + CocoaPods. Cold pod install + SwiftPM resolve + Xcode build is slow;
@@ -569,13 +620,22 @@ jobs:
           echo "ios build seconds: $(( $(date +%s) - START ))"
 
       - name: Upload iOS artifacts to release
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only != true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           files: |
             src-tauri/gen/apple/build/**/*.ipa
         continue-on-error: true
+
+      - name: Upload iOS candidate artifacts
+        if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-candidate-v${{ inputs.version }}-ios
+          path: src-tauri/gen/apple/build/**/*.ipa
+          retention-days: 14
+          if-no-files-found: error
 
   # ── Metrics summary: consolidate per-leg cache/build metrics + track savings over time ──
   # Directive B: build-caching must show MEASURED savings that persist across builds.
