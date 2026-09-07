@@ -12,9 +12,9 @@ Organization-level GitHub configuration and branding for the Plures ecosystem. T
 ## Current Architecture
 
 ### Brand Identity
-- **Messaging**: Pares ecosystem — decentralized commerce platform and P2P development toolchain
+- **Messaging**: Practical tools for network operations, local memory and accountable automation for LLMs and agents
 - **Visual**: SVG assets in `/assets/images/`
-- **Tone**: Creator-first, decentralized, local-first development
+- **Tone**: Useful, careful and collaborative; people keep control of their tools and data
 
 ### Workflow Templates
 - Located in `/workflow-templates/`
@@ -22,18 +22,18 @@ Organization-level GitHub configuration and branding for the Plures ecosystem. T
 - Currently minimal - needs expansion
 
 ### Profile Content
-- `/profile/README.md` - Public org profile
-- Main `/README.md` - Detailed org overview with featured projects
+- `/profile/README.md` - Public org profile based on the approved identity and PX public projection
+- Main `/README.md` - Same approved identity and public projection for repository visitors
 
 ## Design Issues & Improvements
 
 ### 1. **Messaging Alignment** ✅
-**Status**: Completed — branding now emphasizes the Pares ecosystem (Pares Cache, Pares Marketplace, decentralized commerce) across the org profile and all public-facing docs.
+**Status**: Completed — branding now emphasizes practical tools for network operations, local memory and accountable automation across the org profile and all public-facing docs.
 
 **Current positioning**:
-- "Decentralized Commerce Tools"
-- "P2P Development Platform"
-- Pares ecosystem as the primary brand identity
+- "More, together."
+- Practical tools for network operations, local memory and accountable automation
+- People keep control of their tools and data
 
 ### 2. **Workflow Template Gaps**
 **Problem**: Most repos create CI from scratch instead of inheriting org templates.
@@ -64,7 +64,7 @@ Organization-level GitHub configuration and branding for the Plures ecosystem. T
 
 ## Next Implementation Phase
 
-1. **Brand Refresh** ✅ - Messaging realigned from generic GitHub tools → Pares ecosystem
+1. **Brand Refresh** ✅ - Messaging realigned to the approved Plures identity
 2. **Template Library** - Comprehensive workflow templates for common patterns
 3. **Documentation Templates** - Standard repo documentation structure
 4. **Security Hardening** - Org-level security policies and templates
