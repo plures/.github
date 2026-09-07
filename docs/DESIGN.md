@@ -22,7 +22,7 @@ Organization-level GitHub configuration and branding for the Plures ecosystem. T
 - Currently minimal - needs expansion
 
 ### Profile Content
-- `/profile/README.md` - Public org profile generated from the approved identity and PX public projection
+- `/profile/README.md` - Public org profile based on the approved identity and PX public projection
 - Main `/README.md` - Same approved identity and public projection for repository visitors
 
 ## Design Issues & Improvements
