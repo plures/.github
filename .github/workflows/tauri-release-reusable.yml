@@ -238,7 +238,7 @@ jobs:
         with:
           projectPath: ${{ inputs.tauri_project_path }}
           tauriScript: ${{ inputs.tauri_script }}
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Upload installer candidate
         if: steps.gate.outputs.run == 'true' && inputs.artifact_only == true
