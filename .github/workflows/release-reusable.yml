@@ -35,6 +35,11 @@ on:
         required: false
         type: string
         default: ""
+      version_manifest_path:
+        description: "Optional repository-relative Cargo.toml, package.json, or deno.json used only to discover the release version."
+        required: false
+        type: string
+        default: ""
       dry_run:
         description: "Dry run (skip publishing)"
         required: false
@@ -147,18 +152,44 @@ jobs:
             echo "pkg_manager=npm" >> $GITHUB_OUTPUT
           fi
 
-          # Get current version (Cargo.toml first for Rust projects — package.json may lack version)
+          # Get current version (Cargo.toml first for Rust projects — package.json may lack version).
+          # A caller may explicitly select a nested manifest without changing root project-type
+          # detection or enabling a registry publisher for that nested project.
           VERSION=""
-          if [ -f Cargo.toml ] && grep -q '^\[workspace\.package\]' Cargo.toml; then
-            VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
-          elif [ -f Cargo.toml ] && grep -q '^version' Cargo.toml; then
-            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          fi
-          if [ -z "$VERSION" ] && [ -f package.json ]; then
-            VERSION=$(node -p "require('./package.json').version || ''" 2>/dev/null || echo "")
-          fi
-          if [ -z "$VERSION" ] && [ -f deno.json ]; then
-            VERSION=$(node -p "require('./deno.json').version || ''" 2>/dev/null || echo "")
+          VERSION_MANIFEST="${{ inputs.version_manifest_path }}"
+          if [ -n "$VERSION_MANIFEST" ]; then
+            if [[ "$VERSION_MANIFEST" = /* ]] || [[ "$VERSION_MANIFEST" =~ (^|/)\.\.(/|$) ]] || [ ! -f "$VERSION_MANIFEST" ]; then
+              echo "::error::version_manifest_path must name an existing repository-relative manifest: $VERSION_MANIFEST"
+              exit 1
+            fi
+            case "$VERSION_MANIFEST" in
+              Cargo.toml|*/Cargo.toml)
+                if grep -q '^\[workspace\.package\]' "$VERSION_MANIFEST"; then
+                  VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' "$VERSION_MANIFEST" | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+                else
+                  VERSION=$(grep '^version' "$VERSION_MANIFEST" | head -1 | sed 's/.*"\(.*\)"/\1/')
+                fi
+                ;;
+              package.json|*/package.json|deno.json|*/deno.json)
+                VERSION=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version || "")' "$VERSION_MANIFEST" 2>/dev/null || echo "")
+                ;;
+              *)
+                echo "::error::version_manifest_path supports Cargo.toml, package.json, or deno.json: $VERSION_MANIFEST"
+                exit 1
+                ;;
+            esac
+          else
+            if [ -f Cargo.toml ] && grep -q '^\[workspace\.package\]' Cargo.toml; then
+              VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+            elif [ -f Cargo.toml ] && grep -q '^version' Cargo.toml; then
+              VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+            fi
+            if [ -z "$VERSION" ] && [ -f package.json ]; then
+              VERSION=$(node -p "require('./package.json').version || ''" 2>/dev/null || echo "")
+            fi
+            if [ -z "$VERSION" ] && [ -f deno.json ]; then
+              VERSION=$(node -p "require('./deno.json').version || ''" 2>/dev/null || echo "")
+            fi
           fi
           # Validate semver (major.minor.patch) — reject garbage like "undefined.3.1"
           if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
@@ -240,15 +271,19 @@ jobs:
 
           # A protected branch cannot accept the generated version commit directly.
           # When a release-preparation PR has merged, its title is the durable marker
-          # that this exact manifest version is ready to tag and publish.  Finalize it
+          # that this exact manifest version is ready to tag and publish. A following
+          # CI/chore merge can otherwise hide that marker at HEAD and trigger another
+          # identical preparation PR. Finalize the newest matching preparation commit
           # without generating a second bump or changelog entry.
           if [ -z "$TARGET_VERSION" ] \
              && [ -n "$CURRENT" ] \
-             && git log -1 --format=%s | grep -qE "^chore\\(release\\): v${CURRENT}(\\s|$)" \
              && ! git rev-parse -q --verify "refs/tags/v${CURRENT}" >/dev/null; then
-            TARGET_VERSION="$CURRENT"
-            RELEASE_COMMIT_EXISTS=true
-            echo "Finalizing merged release-preparation commit for v$CURRENT"
+            PREPARATION_COMMIT=$(git log --format=%H --grep="^chore(release): v${CURRENT}" -1)
+            if [ -n "$PREPARATION_COMMIT" ]; then
+              TARGET_VERSION="$CURRENT"
+              RELEASE_COMMIT_EXISTS=true
+              echo "Finalizing merged release-preparation commit $PREPARATION_COMMIT for v$CURRENT"
+            fi
           fi
           echo "release_commit_exists=$RELEASE_COMMIT_EXISTS" >> $GITHUB_OUTPUT
 
